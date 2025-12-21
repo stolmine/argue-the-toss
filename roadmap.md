@@ -59,22 +59,25 @@
 - [x] Deadzone camera system (33% adaptive ratio, smooth following)
 - [x] Targeting cursor foundation (Look mode with free cursor)
 - [x] Player highlighting (bright green for easy identification)
+- [x] Time budget system (seconds per turn instead of abstract AP)
+- [x] Multi-turn action tracking (actions that span multiple turns)
+- [x] Action commitment system (locked-in actions, partial time tracking)
+- [x] Turn-based game loop
+- [x] Turn timescale determination (how much real-time per turn)
+- [x] Basic UI panels (event log, stats)
+- [x] Line-of-sight calculations (bracket-lib FOV with symmetric shadowcasting)
+- [x] Vision stat system (per-entity vision range)
+- [x] Terrain-based LOS blocking (Fortifications, Trees, Buildings)
+- [x] Fog of war (visible/explored/unexplored states)
 
 #### In Progress Tasks
 - [ ] Movement system with pathfinding (bracket-pathfinding)
-- [ ] Line-of-sight calculations (bracket-lib FOV)
 - [ ] Basic combat (hitscan weapons)
 - [ ] Ammunition mechanic (reloading, running out of ammo)
-- [ ] Time budget system (seconds per turn instead of abstract AP)
-- [ ] Multi-turn action tracking (actions that span multiple turns)
-- [ ] Action commitment system (locked-in actions, partial time tracking)
-- [ ] Turn-based game loop
-- [ ] Turn timescale determination (how much real-time per turn)
 - [ ] Action/event subdivision for animation support (sub-turn phases)
-- [ ] Basic UI panels (event log, stats)
 - [ ] Targeting system completion (object pickup, enemy selection actions)
 - [ ] Visual indication of entity actions (movement trails, firing indicators, grenade throws)
-- [ ] Player vision cone system (CDDA-style directional FOV)
+- [ ] Player vision cone system (CDCA-style directional FOV)
 - [ ] Terrain dimming outside vision cone
 - [ ] Last-seen entity markers (static ghosts of last known positions)
 - [ ] FOW mode options (no FOW, friendly vision, player-only vision)
@@ -84,18 +87,22 @@
 - ✓ Modal UI with Command and Look modes
 - ✓ Basic player movement with camera following
 - ✓ Targeting cursor foundation (free cursor in Look mode)
+- ✓ Time budget system limits actions (10 sec/turn budget, configurable 5-30s)
+- ✓ Actions have time costs (move: 2s × terrain, shoot: 3s, reload: 5s, etc.)
+- ✓ Multi-turn actions tracked correctly (partial completion, locked-in state)
+- ✓ Over-budget actions handle gracefully (time debt carries to next turn)
+- ✓ Turn timescale defined (seconds per turn) and consistent
+- ✓ Time remaining displayed clearly in UI
+- ✓ Event log displays action feedback and turn transitions
+- ✓ Line-of-sight calculated with symmetric shadowcasting
+- ✓ Terrain blocks LOS (Fortifications, Trees, Buildings)
+- ✓ Vision stat per entity (allows progression)
+- ✓ Fog of war with visible/explored/unexplored states
 - Player can move units with pathfinding
 - Combat resolves with line-of-sight checks
 - Weapons require reloading and can run out of ammunition
-- Time budget system limits actions (e.g., 10 sec/turn budget)
-- Actions have time costs (move: 2s, shoot: 3s, reload: 5s, etc.)
-- Multi-turn actions tracked correctly (partial completion, locked-in state)
-- Over-budget actions handle gracefully (commit to complete next turn)
-- Turn timescale defined (seconds/minutes per turn) and consistent
 - Actions subdivided into phases for smooth animation
-- Time remaining displayed clearly in UI
 - Committed actions shown with progress indicators
-- Event log displays combat results
 - Targeting cursor allows object/enemy selection actions
 - Prior turn actions are visually indicated (who moved, fired, threw grenades)
 - Vision cone emanates from player with directional awareness
