@@ -67,6 +67,8 @@
 - [ ] Ammunition mechanic (reloading, running out of ammo)
 - [ ] Action point system
 - [ ] Turn-based game loop
+- [ ] Turn timescale determination (how much real-time per turn)
+- [ ] Action/event subdivision for animation support (sub-turn phases)
 - [ ] Basic UI panels (event log, stats)
 - [ ] Targeting system completion (object pickup, enemy selection actions)
 - [ ] Visual indication of entity actions (movement trails, firing indicators, grenade throws)
@@ -84,6 +86,8 @@
 - Combat resolves with line-of-sight checks
 - Weapons require reloading and can run out of ammunition
 - Action points limit player actions per turn
+- Turn timescale defined (seconds/minutes per turn) and consistent
+- Actions subdivided into phases for smooth animation
 - Event log displays combat results
 - Targeting cursor allows object/enemy selection actions
 - Prior turn actions are visually indicated (who moved, fired, threw grenades)
