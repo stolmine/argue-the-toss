@@ -27,8 +27,8 @@ impl InputMode {
 
     pub fn help_text(&self) -> &'static str {
         match self {
-            InputMode::Command => "hjkl/arrows: move | x: look mode | q: quit",
-            InputMode::Look => "hjkl/arrows: move cursor | Enter: select | ESC: exit",
+            InputMode::Command => "hjkl/arrows: move | x: look | c: center | q: quit",
+            InputMode::Look => "hjkl/arrows: pan camera | c: center | Enter: select | ESC: exit",
         }
     }
 }

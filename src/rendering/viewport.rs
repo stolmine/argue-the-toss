@@ -14,12 +14,44 @@ pub struct Camera {
 }
 
 impl Camera {
+    /// Deadzone size as fraction of viewport (0.0 to 1.0)
+    /// Player can move within this zone without camera following
+    const DEADZONE_RATIO: f32 = 0.33;
+
     /// Creates a new camera centered at the given position
     pub fn new(center: Position, viewport_width: usize, viewport_height: usize) -> Self {
         Self {
             center,
             viewport_width,
             viewport_height,
+        }
+    }
+
+    /// Gets the adaptive deadzone width based on current viewport
+    pub fn deadzone_width(&self) -> i32 {
+        (self.viewport_width as f32 * Self::DEADZONE_RATIO) as i32
+    }
+
+    /// Gets the adaptive deadzone height based on current viewport
+    pub fn deadzone_height(&self) -> i32 {
+        (self.viewport_height as f32 * Self::DEADZONE_RATIO) as i32
+    }
+
+    /// Checks if a position is within the camera's deadzone
+    pub fn in_deadzone(&self, pos: &Position) -> bool {
+        let dx = (pos.x - self.center.x).abs();
+        let dy = (pos.y - self.center.y).abs();
+        let half_dz_width = self.deadzone_width() / 2;
+        let half_dz_height = self.deadzone_height() / 2;
+
+        dx <= half_dz_width && dy <= half_dz_height
+    }
+
+    /// Smoothly move camera towards target if outside deadzone
+    pub fn follow_target(&mut self, target: &Position) {
+        if !self.in_deadzone(target) {
+            // Move camera to recenter on target
+            self.center = *target;
         }
     }
 

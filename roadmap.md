@@ -63,6 +63,10 @@
 - [ ] Targeting system for player (object pickup, enemy selection)
 - [ ] Adaptable battlefield viewport (dynamic sizing)
 - [ ] Visual indication of entity actions (movement trails, firing indicators, grenade throws)
+- [ ] Player vision cone system (CDDA-style directional FOV)
+- [ ] Terrain dimming outside vision cone
+- [ ] Last-seen entity markers (static ghosts of last known positions)
+- [ ] FOW mode options (no FOW, friendly vision, player-only vision)
 
 #### Success Criteria
 - Player can move units with pathfinding
@@ -73,6 +77,10 @@
 - Targeting cursor allows object/enemy selection
 - Viewport adapts to terminal size
 - Prior turn actions are visually indicated (who moved, fired, threw grenades)
+- Vision cone emanates from player with directional awareness
+- Terrain outside vision is dimmed/obscured
+- Last-seen enemy positions marked with static indicators
+- Multiple FOW modes available (configurable)
 
 ---
 

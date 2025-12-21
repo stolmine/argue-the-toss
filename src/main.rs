@@ -20,7 +20,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame, Terminal,
 };
-use specs::{Builder, World, WorldExt};
+use specs::{Builder, Join, World, WorldExt};
 use std::io;
 
 /// Main game state
@@ -34,7 +34,7 @@ struct GameState {
 }
 
 impl GameState {
-    fn new() -> Self {
+    fn new(viewport_width: usize, viewport_height: usize) -> Self {
         let mut world = World::new();
 
         // Register components
@@ -66,14 +66,17 @@ impl GameState {
             }
         }
 
-        // Create camera centered at (50, 50) with 60x40 viewport
-        let camera = Camera::new(BattlefieldPos::new(50, 50), 60, 40);
+        // Player starting position
+        let player_start_pos = BattlefieldPos::new(50, 50);
+
+        // Create camera centered at player position with adaptive viewport
+        let camera = Camera::new(player_start_pos, viewport_width, viewport_height);
 
         // Create some test soldiers
         // First soldier is player-controlled
         world
             .create_entity()
-            .with(Position::new(50, 50))
+            .with(Position::new(player_start_pos.x, player_start_pos.y))
             .with(Soldier {
                 name: "Pvt. Smith".to_string(),
                 faction: Faction::Allies,
@@ -108,7 +111,20 @@ impl GameState {
             camera,
             running: true,
             input_mode: InputMode::default(),
-            cursor_pos: BattlefieldPos::new(50, 50),
+            cursor_pos: player_start_pos,
+        }
+    }
+
+    /// Update viewport size based on terminal dimensions
+    fn update_viewport_size(&mut self, area: Rect) {
+        // Account for borders (2 chars horizontal, 2 vertical) and status panel
+        let new_width = (area.width.saturating_sub(2)) as usize;
+        let new_height = (area.height.saturating_sub(7)) as usize; // -2 for borders, -5 for status panel
+
+        // Only update if size actually changed
+        if new_width != self.camera.viewport_width || new_height != self.camera.viewport_height {
+            self.camera.viewport_width = new_width;
+            self.camera.viewport_height = new_height;
         }
     }
 
@@ -130,6 +146,14 @@ impl GameState {
                     self.cursor_pos = player_pos;
                 }
             }
+            KeyCode::Char('c') => {
+                // Center camera on player
+                if let Some(player_pos) = self.get_player_position() {
+                    self.camera.center_on(player_pos);
+                    self.camera
+                        .constrain(self.battlefield.width(), self.battlefield.height());
+                }
+            }
             // Movement keys - move player
             KeyCode::Up | KeyCode::Char('k') => self.move_player(0, -1),
             KeyCode::Down | KeyCode::Char('j') => self.move_player(0, 1),
@@ -149,30 +173,48 @@ impl GameState {
                 // Select target at cursor (future: targeting logic)
                 self.input_mode = InputMode::Command;
             }
-            // Movement keys - move cursor
+            KeyCode::Char('c') => {
+                // Center camera on player
+                if let Some(player_pos) = self.get_player_position() {
+                    self.camera.center_on(player_pos);
+                    self.camera
+                        .constrain(self.battlefield.width(), self.battlefield.height());
+                }
+            }
+            // Movement keys - move cursor AND camera in Look mode
             KeyCode::Up | KeyCode::Char('k') => {
                 self.cursor_pos.y -= 1;
                 self.constrain_cursor();
+                self.camera.pan(0, -1);
+                self.camera
+                    .constrain(self.battlefield.width(), self.battlefield.height());
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.cursor_pos.y += 1;
                 self.constrain_cursor();
+                self.camera.pan(0, 1);
+                self.camera
+                    .constrain(self.battlefield.width(), self.battlefield.height());
             }
             KeyCode::Left | KeyCode::Char('h') => {
                 self.cursor_pos.x -= 1;
                 self.constrain_cursor();
+                self.camera.pan(-1, 0);
+                self.camera
+                    .constrain(self.battlefield.width(), self.battlefield.height());
             }
             KeyCode::Right | KeyCode::Char('l') => {
                 self.cursor_pos.x += 1;
                 self.constrain_cursor();
+                self.camera.pan(1, 0);
+                self.camera
+                    .constrain(self.battlefield.width(), self.battlefield.height());
             }
             _ => {}
         }
     }
 
     fn move_player(&mut self, dx: i32, dy: i32) {
-        use specs::Join;
-
         let mut positions = self.world.write_storage::<Position>();
         let players = self.world.read_storage::<Player>();
 
@@ -185,9 +227,9 @@ impl GameState {
             if self.battlefield.in_bounds(&new_pos) {
                 *pos = Position::new(new_x, new_y);
 
-                // Update camera to follow player in Command mode
+                // Update camera to follow player with deadzone in Command mode
                 if self.input_mode == InputMode::Command {
-                    self.camera.center_on(new_pos);
+                    self.camera.follow_target(&new_pos);
                     self.camera
                         .constrain(self.battlefield.width(), self.battlefield.height());
                 }
@@ -197,8 +239,6 @@ impl GameState {
     }
 
     fn get_player_position(&self) -> Option<BattlefieldPos> {
-        use specs::Join;
-
         let positions = self.world.read_storage::<Position>();
         let players = self.world.read_storage::<Player>();
 
@@ -294,14 +334,14 @@ fn ui(f: &mut Frame, state: &GameState) {
 }
 
 fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
-    use specs::Join;
-
+    let entities = state.world.entities();
     let positions = state.world.read_storage::<Position>();
     let soldiers = state.world.read_storage::<Soldier>();
+    let players = state.world.read_storage::<Player>();
 
     let top_left = state.camera.top_left();
 
-    for (pos, soldier) in (&positions, &soldiers).join() {
+    for (entity, pos, soldier) in (&entities, &positions, &soldiers).join() {
         let screen_x = pos.x() - top_left.x;
         let screen_y = pos.y() - top_left.y;
 
@@ -316,9 +356,15 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
 
             if buf_x < area.right() && buf_y < area.bottom() {
                 let ch = soldier.faction.to_char();
-                let color = match soldier.faction {
-                    Faction::Allies => Color::Blue,
-                    Faction::CentralPowers => Color::Red,
+
+                // Player character is bright green, others use faction colors
+                let color = if players.contains(entity) {
+                    Color::LightGreen
+                } else {
+                    match soldier.faction {
+                        Faction::Allies => Color::Blue,
+                        Faction::CentralPowers => Color::Red,
+                    }
                 };
 
                 f.buffer_mut()[(buf_x, buf_y)]
@@ -359,8 +405,13 @@ fn main() -> Result<(), io::Error> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create game state
-    let mut game_state = GameState::new();
+    // Get initial terminal size
+    let size = terminal.size()?;
+    let initial_width = (size.width.saturating_sub(2)) as usize;
+    let initial_height = (size.height.saturating_sub(7)) as usize;
+
+    // Create game state with adaptive viewport
+    let mut game_state = GameState::new(initial_width, initial_height);
 
     // Main game loop
     while game_state.running {
@@ -368,7 +419,11 @@ fn main() -> Result<(), io::Error> {
         game_state.update_visibility();
 
         // Render
-        terminal.draw(|f| ui(f, &game_state))?;
+        terminal.draw(|f| {
+            // Update viewport size if terminal was resized
+            game_state.update_viewport_size(f.area());
+            ui(f, &game_state)
+        })?;
 
         // Handle input
         if event::poll(std::time::Duration::from_millis(100))? {
