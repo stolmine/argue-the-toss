@@ -1,6 +1,6 @@
 # Argue the Toss - Development Roadmap
 
-## Project Status: Development Phase
+## Project Status: Phase 1 Complete - Moving to Phase 2
 
 ### Current Phase: Phase 0 - Project Setup
 **Status:** Completed
@@ -29,20 +29,28 @@ Moving to Phase 1: Core Foundation
 
 ### Phase 1: Core Foundation
 **Target:** Basic rendering and viewport system
-**Status:** Not Started
+**Status:** Completed
 
-#### Planned Tasks
-- [ ] Basic ratatui viewport rendering
-- [ ] Simple unit representation (ASCII characters)
-- [ ] Camera/viewport system for panning
-- [ ] Basic fog of war implementation
-- [ ] Input handling system
+#### Completed Tasks
+- [x] Basic ratatui viewport rendering
+- [x] Simple unit representation (ASCII characters)
+- [x] Camera/viewport system for panning
+- [x] Basic fog of war implementation
+- [x] Input handling system
 
-#### Success Criteria
-- Viewport displays grid-based battlefield
-- Camera can pan across larger logical battlefield
-- Units render as distinct characters
-- Basic fog of war obscures unseen areas
+#### Success Criteria - All Met ✓
+- ✓ Viewport displays grid-based battlefield (100x100 grid with 60x40 viewport)
+- ✓ Camera can pan across larger logical battlefield (arrow keys / hjkl)
+- ✓ Units render as distinct characters (@ for Allies, Ӝ for Central Powers)
+- ✓ Basic fog of war obscures unseen areas (visible/explored/unexplored states)
+
+#### Implementation Details
+- Created `battlefield.rs` with grid structure, terrain types, and fog of war
+- Created `viewport.rs` with Camera system for panning and viewport management
+- Created `widgets.rs` with BattlefieldWidget for ratatui rendering
+- Created ECS components: Position and Soldier
+- Integrated Specs ECS for entity management
+- Full game loop with input handling in main.rs
 
 ---
 

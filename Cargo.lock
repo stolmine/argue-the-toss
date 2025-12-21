@@ -24,6 +24,7 @@ name = "argue-the-toss"
 version = "0.1.0"
 dependencies = [
  "bracket-pathfinding",
+ "crossterm",
  "ratatui",
  "specs",
 ]

@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 # TUI Framework
 ratatui = { version = "0.29.0", features = ["all-widgets", "serde"] }
+crossterm = "0.28.1"
 
 # Roguelike Utilities (Pathfinding, FOV)
 bracket-pathfinding = "0.8.7"
