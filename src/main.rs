@@ -5,7 +5,7 @@ use argue_the_toss::{
     components::{player::Player, position::Position, soldier::{Faction, Rank, Soldier}},
     game_logic::battlefield::{Battlefield, Position as BattlefieldPos, TerrainType},
     rendering::{viewport::Camera, widgets::BattlefieldWidget},
-    utils::input_mode::InputMode,
+    utils::{event_log::EventLog, input_mode::InputMode},
 };
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent},
@@ -31,6 +31,7 @@ struct GameState {
     running: bool,
     input_mode: InputMode,
     cursor_pos: BattlefieldPos, // For Look mode
+    event_log: EventLog,
 }
 
 impl GameState {
@@ -105,6 +106,10 @@ impl GameState {
             })
             .build();
 
+        let mut event_log = EventLog::new();
+        event_log.add("Welcome to Argue the Toss!".to_string());
+        event_log.add("WWI Trench Warfare Roguelike".to_string());
+
         Self {
             world,
             battlefield,
@@ -112,6 +117,7 @@ impl GameState {
             running: true,
             input_mode: InputMode::default(),
             cursor_pos: player_start_pos,
+            event_log,
         }
     }
 
@@ -261,6 +267,48 @@ impl GameState {
             .min(self.battlefield.height() as i32 - 1);
     }
 
+    /// Get terrain description at a position
+    fn get_terrain_info(&self, pos: &BattlefieldPos) -> String {
+        if let Some(tile) = self.battlefield.get_tile(pos) {
+            let terrain_name = match tile.terrain {
+                TerrainType::Trench => "Trench",
+                TerrainType::NoMansLand => "No Man's Land",
+                TerrainType::Mud => "Mud",
+                TerrainType::Fortification => "Fortification",
+            };
+            let visibility = if tile.visible {
+                "visible"
+            } else if tile.explored {
+                "explored"
+            } else {
+                "unexplored"
+            };
+            format!("{} ({})", terrain_name, visibility)
+        } else {
+            "Out of bounds".to_string()
+        }
+    }
+
+    /// Get entity info at cursor position (for Look mode)
+    fn get_entity_info(&self, pos: &BattlefieldPos) -> Option<String> {
+        let positions = self.world.read_storage::<Position>();
+        let soldiers = self.world.read_storage::<Soldier>();
+        let players = self.world.read_storage::<Player>();
+        let entities = self.world.entities();
+
+        for (entity, soldier_pos, soldier) in (&entities, &positions, &soldiers).join() {
+            if soldier_pos.as_battlefield_pos() == pos {
+                let is_player = players.contains(entity);
+                let player_marker = if is_player { " (YOU)" } else { "" };
+                return Some(format!(
+                    "{}{} - {:?} {}",
+                    soldier.name, player_marker, soldier.faction, soldier.rank.as_str()
+                ));
+            }
+        }
+        None
+    }
+
     fn update_visibility(&mut self) {
         // Reset all visibility
         self.battlefield.reset_visibility();
@@ -281,13 +329,23 @@ impl GameState {
 }
 
 fn ui(f: &mut Frame, state: &GameState) {
-    let chunks = Layout::default()
+    // Main layout: Top (battlefield + event log) and Bottom (info panel)
+    let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),      // Main battlefield view
-            Constraint::Length(5),    // Status/info panel
+            Constraint::Min(10),      // Top: battlefield + event log
+            Constraint::Length(7),    // Bottom: info panel
         ])
         .split(f.area());
+
+    // Top split: Battlefield (left) and Event Log (right)
+    let top_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(75),  // Battlefield
+            Constraint::Percentage(25),  // Event log
+        ])
+        .split(main_chunks[0]);
 
     // Render battlefield
     let battlefield_block = Block::default()
@@ -295,8 +353,8 @@ fn ui(f: &mut Frame, state: &GameState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::White));
 
-    let inner_area = battlefield_block.inner(chunks[0]);
-    f.render_widget(battlefield_block, chunks[0]);
+    let inner_area = battlefield_block.inner(top_chunks[0]);
+    f.render_widget(battlefield_block, top_chunks[0]);
 
     let battlefield_widget = BattlefieldWidget::new(&state.battlefield, &state.camera);
     f.render_widget(battlefield_widget, inner_area);
@@ -309,28 +367,63 @@ fn ui(f: &mut Frame, state: &GameState) {
         render_cursor(f, inner_area, state);
     }
 
-    // Render status panel
+    // Render event log
+    let event_log_block = Block::default()
+        .title("Event Log")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let recent_events = state.event_log.recent(15);
+    let event_lines: Vec<Line> = recent_events
+        .iter()
+        .map(|e| Line::from(e.as_str()))
+        .collect();
+
+    let event_paragraph = Paragraph::new(Text::from(event_lines)).block(event_log_block);
+    f.render_widget(event_paragraph, top_chunks[1]);
+
+    // Render info panel
     let mode_color = match state.input_mode {
         InputMode::Command => Color::Green,
         InputMode::Look => Color::Yellow,
     };
 
-    let status_block = Block::default()
-        .title(format!("Mode: {}", state.input_mode.name()))
+    let info_block = Block::default()
+        .title(format!("Mode: {} | Info", state.input_mode.name()))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(mode_color));
 
-    let status_text = vec![
+    let mut info_lines = vec![
         Line::from(state.input_mode.help_text()),
         Line::from(""),
-        Line::from(format!(
-            "Camera: ({}, {})",
-            state.camera.center.x, state.camera.center.y
-        )),
     ];
 
-    let status_paragraph = Paragraph::new(Text::from(status_text)).block(status_block);
-    f.render_widget(status_paragraph, chunks[1]);
+    // Show terrain info for player position or cursor position
+    let inspect_pos = if state.input_mode == InputMode::Look {
+        state.cursor_pos
+    } else {
+        state.get_player_position().unwrap_or(state.cursor_pos)
+    };
+
+    info_lines.push(Line::from(format!(
+        "Position: ({}, {})",
+        inspect_pos.x, inspect_pos.y
+    )));
+    info_lines.push(Line::from(format!(
+        "Terrain: {}",
+        state.get_terrain_info(&inspect_pos)
+    )));
+
+    // In Look mode, show entity info if any
+    if state.input_mode == InputMode::Look {
+        if let Some(entity_info) = state.get_entity_info(&state.cursor_pos) {
+            info_lines.push(Line::from(""));
+            info_lines.push(Line::from(format!("Entity: {}", entity_info)));
+        }
+    }
+
+    let info_paragraph = Paragraph::new(Text::from(info_lines)).block(info_block);
+    f.render_widget(info_paragraph, main_chunks[1]);
 }
 
 fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
