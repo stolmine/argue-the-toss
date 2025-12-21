@@ -66,6 +66,8 @@
 - [ ] Basic combat (hitscan weapons)
 - [ ] Ammunition mechanic (reloading, running out of ammo)
 - [ ] Time budget system (seconds per turn instead of abstract AP)
+- [ ] Multi-turn action tracking (actions that span multiple turns)
+- [ ] Action commitment system (locked-in actions, partial time tracking)
 - [ ] Turn-based game loop
 - [ ] Turn timescale determination (how much real-time per turn)
 - [ ] Action/event subdivision for animation support (sub-turn phases)
@@ -87,9 +89,12 @@
 - Weapons require reloading and can run out of ammunition
 - Time budget system limits actions (e.g., 10 sec/turn budget)
 - Actions have time costs (move: 2s, shoot: 3s, reload: 5s, etc.)
+- Multi-turn actions tracked correctly (partial completion, locked-in state)
+- Over-budget actions handle gracefully (commit to complete next turn)
 - Turn timescale defined (seconds/minutes per turn) and consistent
 - Actions subdivided into phases for smooth animation
 - Time remaining displayed clearly in UI
+- Committed actions shown with progress indicators
 - Event log displays combat results
 - Targeting cursor allows object/enemy selection actions
 - Prior turn actions are visually indicated (who moved, fired, threw grenades)
