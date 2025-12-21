@@ -65,7 +65,7 @@
 - [ ] Line-of-sight calculations (bracket-lib FOV)
 - [ ] Basic combat (hitscan weapons)
 - [ ] Ammunition mechanic (reloading, running out of ammo)
-- [ ] Action point system
+- [ ] Time budget system (seconds per turn instead of abstract AP)
 - [ ] Turn-based game loop
 - [ ] Turn timescale determination (how much real-time per turn)
 - [ ] Action/event subdivision for animation support (sub-turn phases)
@@ -85,9 +85,11 @@
 - Player can move units with pathfinding
 - Combat resolves with line-of-sight checks
 - Weapons require reloading and can run out of ammunition
-- Action points limit player actions per turn
+- Time budget system limits actions (e.g., 10 sec/turn budget)
+- Actions have time costs (move: 2s, shoot: 3s, reload: 5s, etc.)
 - Turn timescale defined (seconds/minutes per turn) and consistent
 - Actions subdivided into phases for smooth animation
+- Time remaining displayed clearly in UI
 - Event log displays combat results
 - Targeting cursor allows object/enemy selection actions
 - Prior turn actions are visually indicated (who moved, fired, threw grenades)
