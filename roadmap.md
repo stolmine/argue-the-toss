@@ -62,19 +62,23 @@ Moving to Phase 1: Core Foundation
 - [ ] Movement system with pathfinding (bracket-pathfinding)
 - [ ] Line-of-sight calculations (bracket-lib FOV)
 - [ ] Basic combat (hitscan weapons)
+- [ ] Ammunition mechanic (reloading, running out of ammo)
 - [ ] Action point system
 - [ ] Turn-based game loop
 - [ ] Basic UI panels (event log, stats)
 - [ ] Targeting system for player (object pickup, enemy selection)
 - [ ] Adaptable battlefield viewport (dynamic sizing)
+- [ ] Visual indication of entity actions (movement trails, firing indicators, grenade throws)
 
 #### Success Criteria
 - Player can move units with pathfinding
 - Combat resolves with line-of-sight checks
+- Weapons require reloading and can run out of ammunition
 - Action points limit player actions per turn
 - Event log displays combat results
 - Targeting cursor allows object/enemy selection
 - Viewport adapts to terminal size
+- Prior turn actions are visually indicated (who moved, fired, threw grenades)
 
 ---
 
@@ -136,6 +140,7 @@ Moving to Phase 1: Core Foundation
 - [ ] Debuff system (wounds, shell shock, disease)
 - [ ] Rank and promotion system
 - [ ] Medic units with healing abilities
+- [ ] Simulated inventories for all NPCs (weapons, ammo, items)
 
 #### Success Criteria
 - AI soldiers make tactical decisions
@@ -143,6 +148,7 @@ Moving to Phase 1: Core Foundation
 - Characters gain experience and improve
 - Squad formations provide tactical benefits
 - Medics can heal wounded soldiers
+- All NPCs track and manage their own inventories
 
 ---
 
