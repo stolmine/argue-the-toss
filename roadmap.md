@@ -65,12 +65,16 @@ Moving to Phase 1: Core Foundation
 - [ ] Action point system
 - [ ] Turn-based game loop
 - [ ] Basic UI panels (event log, stats)
+- [ ] Targeting system for player (object pickup, enemy selection)
+- [ ] Adaptable battlefield viewport (dynamic sizing)
 
 #### Success Criteria
 - Player can move units with pathfinding
 - Combat resolves with line-of-sight checks
 - Action points limit player actions per turn
 - Event log displays combat results
+- Targeting cursor allows object/enemy selection
+- Viewport adapts to terminal size
 
 ---
 
@@ -80,6 +84,9 @@ Moving to Phase 1: Core Foundation
 
 #### Planned Tasks
 - [ ] Terrain types (mud, trenches, no-man's-land)
+- [ ] Additional terrain types (vegetation, tree, concrete, water)
+- [ ] Color coding for all terrain types
+- [ ] Buildings (multi-tile structures spanning multiple positions)
 - [ ] Movement cost based on terrain
 - [ ] Cover mechanics and calculations
 - [ ] Weather effects (rain, fog, snow)
@@ -88,6 +95,8 @@ Moving to Phase 1: Core Foundation
 
 #### Success Criteria
 - Different terrain affects movement speed
+- All terrain types have distinct colors and characters
+- Buildings render as multi-tile structures
 - Cover provides combat bonuses
 - Weather affects visibility
 - Lighting changes visibility ranges
@@ -126,12 +135,14 @@ Moving to Phase 1: Core Foundation
 - [ ] Character stats and progression
 - [ ] Debuff system (wounds, shell shock, disease)
 - [ ] Rank and promotion system
+- [ ] Medic units with healing abilities
 
 #### Success Criteria
 - AI soldiers make tactical decisions
 - Morale affects unit behavior
 - Characters gain experience and improve
 - Squad formations provide tactical benefits
+- Medics can heal wounded soldiers
 
 ---
 
