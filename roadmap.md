@@ -73,9 +73,9 @@
 - [x] Player path planning (Look mode + Enter to select destination)
 - [x] AI pathfinding (NPCs move toward player using pathfinding)
 - [x] Manual movement override (hjkl cancels planned paths)
+- [x] Automatic path execution (Space key advances turn and executes planned path steps)
 
 #### In Progress Tasks
-- [ ] Automatic path execution (Space to advance along planned path - system incomplete)
 - [ ] Basic combat (hitscan weapons)
 - [ ] Ammunition mechanic (reloading, running out of ammo)
 - [ ] Action/event subdivision for animation support (sub-turn phases)
@@ -99,7 +99,8 @@
   - Fix: Implemented Euclidean distance heuristic for optimal pathfinding
 - AI integration: NPCs pathfind toward player instead of waiting
 - Manual override: hjkl movement cancels planned paths
-- **Known Issue:** PathExecutionSystem doesn't automatically execute on Space press yet
+- Space key turn advancement: Triggers PathExecutionSystem to execute next path step
+- Time budget integration: PathExecutionSystem properly consumes time when creating actions
 
 #### Success Criteria
 - ✓ Viewport adapts to terminal size
@@ -122,7 +123,7 @@
 - ✓ Player can plan paths via Look mode cursor
 - ✓ AI uses pathfinding to move toward player
 - ✓ Manual movement (hjkl) overrides planned paths
-- [ ] Automatic path execution (Space advances turn, path step executes automatically)
+- ✓ Automatic path execution (Space advances turn, path step executes automatically)
 - Combat resolves with line-of-sight checks
 - Weapons require reloading and can run out of ammunition
 - Actions subdivided into phases for smooth animation

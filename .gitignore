@@ -1,1 +1,8 @@
 /target
+
+# Debug logs
+*.log
+pathfinding_debug.log
+
+# Agent-generated documentation
+PATHFINDING_FIX.md
