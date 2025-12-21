@@ -17,12 +17,6 @@
 - [x] Initial Cargo.toml configuration with dependencies
 - [x] Basic project structure creation (modular organization)
 
-#### Next Steps
-Moving to Phase 1: Core Foundation
-- [ ] Set up ratatui basic rendering
-- [ ] Initialize Specs ECS framework
-- [ ] Integrate bracket-lib utilities
-
 ---
 
 ## Development Phases
