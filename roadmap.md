@@ -1,6 +1,6 @@
 # Argue the Toss - Development Roadmap
 
-## Project Status: Phase 1 Complete - Moving to Phase 2
+## Project Status: Phase 2 In Progress
 
 ### Current Phase: Phase 0 - Project Setup
 **Status:** Completed
@@ -50,9 +50,17 @@
 
 ### Phase 2: Essential Mechanics
 **Target:** Core gameplay loop
-**Status:** Not Started
+**Status:** In Progress
 
-#### Planned Tasks
+#### Completed Tasks
+- [x] Modal UI system (Command mode vs Look/Targeting mode)
+- [x] Basic player movement system (boundary-checked, camera following)
+- [x] Adaptable battlefield viewport (dynamic sizing, terminal resize support)
+- [x] Deadzone camera system (33% adaptive ratio, smooth following)
+- [x] Targeting cursor foundation (Look mode with free cursor)
+- [x] Player highlighting (bright green for easy identification)
+
+#### In Progress Tasks
 - [ ] Movement system with pathfinding (bracket-pathfinding)
 - [ ] Line-of-sight calculations (bracket-lib FOV)
 - [ ] Basic combat (hitscan weapons)
@@ -60,8 +68,7 @@
 - [ ] Action point system
 - [ ] Turn-based game loop
 - [ ] Basic UI panels (event log, stats)
-- [ ] Targeting system for player (object pickup, enemy selection)
-- [ ] Adaptable battlefield viewport (dynamic sizing)
+- [ ] Targeting system completion (object pickup, enemy selection actions)
 - [ ] Visual indication of entity actions (movement trails, firing indicators, grenade throws)
 - [ ] Player vision cone system (CDDA-style directional FOV)
 - [ ] Terrain dimming outside vision cone
@@ -69,13 +76,16 @@
 - [ ] FOW mode options (no FOW, friendly vision, player-only vision)
 
 #### Success Criteria
+- ✓ Viewport adapts to terminal size
+- ✓ Modal UI with Command and Look modes
+- ✓ Basic player movement with camera following
+- ✓ Targeting cursor foundation (free cursor in Look mode)
 - Player can move units with pathfinding
 - Combat resolves with line-of-sight checks
 - Weapons require reloading and can run out of ammunition
 - Action points limit player actions per turn
 - Event log displays combat results
-- Targeting cursor allows object/enemy selection
-- Viewport adapts to terminal size
+- Targeting cursor allows object/enemy selection actions
 - Prior turn actions are visually indicated (who moved, fired, threw grenades)
 - Vision cone emanates from player with directional awareness
 - Terrain outside vision is dimmed/obscured
