@@ -138,10 +138,22 @@
 ---
 
 ### Phase 3: Environmental Systems
-**Target:** Terrain and weather mechanics
+**Target:** Procedural battlefield generation, terrain types, and weather mechanics
 **Status:** Not Started
 
 #### Planned Tasks
+- [ ] Procedural battlefield generation system
+  - [ ] Intelligent trench network placement (front lines, support trenches, communication trenches)
+  - [ ] Town/village placement with building clusters
+  - [ ] Vegetation distribution (forests, hedgerows, individual trees)
+  - [ ] No-man's-land generation (shell craters, wire, debris)
+  - [ ] Spawn point placement logic (faction-specific starting positions)
+- [ ] Barbed wire obstacles (movement impediment, vision blocking)
+- [ ] Static emplacements
+  - [ ] Machine gun nests (defensive positions)
+  - [ ] Mortar pits
+  - [ ] Artillery positions
+  - [ ] Observation posts
 - [ ] Terrain types (mud, trenches, no-man's-land)
 - [ ] Additional terrain types (vegetation, tree, concrete, water)
 - [ ] Color coding for all terrain types
@@ -153,6 +165,12 @@
 - [ ] Z-level foundation (trenches, elevated positions)
 
 #### Success Criteria
+- Procedural generation creates realistic WWI battlefields
+- Trench networks have logical layout (front/support/communication trenches)
+- Towns and vegetation placed with strategic considerations
+- Spawn points positioned appropriately for each faction
+- Barbed wire creates tactical obstacles
+- Static emplacements provide defensive positions
 - Different terrain affects movement speed
 - All terrain types have distinct colors and characters
 - Buildings render as multi-tile structures
