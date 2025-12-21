@@ -2,6 +2,7 @@
 // Contains all Specs components for game entities
 
 pub mod action;
+pub mod pathfinding;
 pub mod player;
 pub mod position;
 pub mod soldier;

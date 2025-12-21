@@ -85,6 +85,7 @@ impl Default for Tile {
 }
 
 /// The main battlefield grid structure
+#[derive(Clone, Default)]
 pub struct Battlefield {
     width: usize,
     height: usize,

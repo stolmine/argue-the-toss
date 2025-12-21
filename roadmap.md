@@ -69,9 +69,13 @@
 - [x] Vision stat system (per-entity vision range)
 - [x] Terrain-based LOS blocking (Fortifications, Trees, Buildings)
 - [x] Fog of war (visible/explored/unexplored states)
+- [x] Pathfinding system (A* with terrain costs, visual path preview)
+- [x] Player path planning (Look mode + Enter to select destination)
+- [x] AI pathfinding (NPCs move toward player using pathfinding)
+- [x] Manual movement override (hjkl cancels planned paths)
 
 #### In Progress Tasks
-- [ ] Movement system with pathfinding (bracket-pathfinding)
+- [ ] Automatic path execution (Space to advance along planned path - system incomplete)
 - [ ] Basic combat (hitscan weapons)
 - [ ] Ammunition mechanic (reloading, running out of ammo)
 - [ ] Action/event subdivision for animation support (sub-turn phases)
@@ -81,6 +85,21 @@
 - [ ] Terrain dimming outside vision cone
 - [ ] Last-seen entity markers (static ghosts of last known positions)
 - [ ] FOW mode options (no FOW, friendly vision, player-only vision)
+
+#### Implementation Details - Pathfinding System
+- Created `pathfinding.rs` with A* implementation using bracket-pathfinding
+- Created `PlannedPath` component to store multi-step paths
+- Created `PathExecutionSystem` to convert path steps into Move actions
+- Implemented terrain-aware cost calculation (Trench 1.0x, Mud 2.0x, etc.)
+- Added diagonal movement penalty (1.414x for diagonal steps)
+- Integrated path visualization with numbered step display (1-9, then +)
+- **Critical Bug Fix:** Added `get_pathing_distance()` heuristic implementation
+  - Without proper heuristic, A* degraded to exhaustive search
+  - Caused 245-step paths for 7-tile moves (touring entire map)
+  - Fix: Implemented Euclidean distance heuristic for optimal pathfinding
+- AI integration: NPCs pathfind toward player instead of waiting
+- Manual override: hjkl movement cancels planned paths
+- **Known Issue:** PathExecutionSystem doesn't automatically execute on Space press yet
 
 #### Success Criteria
 - ✓ Viewport adapts to terminal size
@@ -98,7 +117,12 @@
 - ✓ Terrain blocks LOS (Fortifications, Trees, Buildings)
 - ✓ Vision stat per entity (allows progression)
 - ✓ Fog of war with visible/explored/unexplored states
-- Player can move units with pathfinding
+- ✓ Pathfinding calculates optimal terrain-aware paths
+- ✓ Path preview shows numbered steps visually
+- ✓ Player can plan paths via Look mode cursor
+- ✓ AI uses pathfinding to move toward player
+- ✓ Manual movement (hjkl) overrides planned paths
+- [ ] Automatic path execution (Space advances turn, path step executes automatically)
 - Combat resolves with line-of-sight checks
 - Weapons require reloading and can run out of ammunition
 - Actions subdivided into phases for smooth animation

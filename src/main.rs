@@ -4,6 +4,7 @@
 use argue_the_toss::{
     components::{
         action::{OngoingAction, QueuedAction},
+        pathfinding::PlannedPath,
         player::Player,
         position::Position,
         soldier::{Faction, Rank, Soldier},
@@ -13,12 +14,13 @@ use argue_the_toss::{
     config::game_config::GameConfig,
     game_logic::{
         battlefield::{Battlefield, Position as BattlefieldPos, TerrainType},
+        pathfinding::calculate_path,
         turn_state::TurnState,
     },
     rendering::{viewport::Camera, widgets::BattlefieldWidget},
     systems::{
         action_execution::ActionExecutionSystem, ai_action_planner::AIActionPlannerSystem,
-        turn_manager::TurnManagerSystem,
+        path_execution::PathExecutionSystem, turn_manager::TurnManagerSystem,
     },
     utils::{event_log::EventLog, input_mode::InputMode},
 };
@@ -61,6 +63,7 @@ impl GameState {
         world.register::<QueuedAction>();
         world.register::<OngoingAction>();
         world.register::<Vision>();
+        world.register::<PlannedPath>();
 
         // Create game config
         let config = GameConfig::default();
@@ -117,6 +120,9 @@ impl GameState {
                 );
             }
         }
+
+        // Insert battlefield as a world resource for systems to access
+        world.insert(battlefield.clone());
 
         // Player starting position
         let player_start_pos = BattlefieldPos::new(50, 50);
@@ -213,6 +219,10 @@ impl GameState {
                         .constrain(self.battlefield.width(), self.battlefield.height());
                 }
             }
+            KeyCode::Char(' ') => {
+                // Space: Advance turn (PathExecutionSystem will handle path step execution)
+                self.advance_turn();
+            }
             // Movement keys - commit movement actions
             KeyCode::Up | KeyCode::Char('k') => self.commit_player_action(0, -1),
             KeyCode::Down | KeyCode::Char('j') => self.commit_player_action(0, 1),
@@ -229,7 +239,43 @@ impl GameState {
                 self.input_mode = InputMode::Command;
             }
             KeyCode::Enter => {
-                // Select target at cursor (future: targeting logic)
+                // Calculate path from player to cursor position
+                if let Some(player_pos) = self.get_player_position() {
+                    if let Some(player_entity) = self.get_player_entity() {
+                        let path = calculate_path(&player_pos, &self.cursor_pos, &self.battlefield);
+
+                        if let Some(steps) = path {
+                            // Calculate total estimated time cost
+                            let total_cost: f32 = steps
+                                .iter()
+                                .map(|pos| {
+                                    self.battlefield
+                                        .get_tile(pos)
+                                        .map(|t| 2.0 * t.terrain.movement_cost())
+                                        .unwrap_or(2.0)
+                                })
+                                .sum();
+
+                            // Insert PlannedPath component for player
+                            let mut paths = self.world.write_storage::<PlannedPath>();
+                            paths
+                                .insert(
+                                    player_entity,
+                                    PlannedPath::new(steps, total_cost, true),
+                                )
+                                .ok();
+
+                            self.world
+                                .write_resource::<EventLog>()
+                                .add(format!("Path planned ({:.1}s)", total_cost));
+                        } else {
+                            let mut log = self.world.write_resource::<EventLog>();
+                            log.add("No path to destination!".to_string());
+                        }
+                    }
+                }
+
+                // Return to Command mode
                 self.input_mode = InputMode::Command;
             }
             KeyCode::Char('c') => {
@@ -273,6 +319,38 @@ impl GameState {
         }
     }
 
+    fn advance_turn(&mut self) {
+        use argue_the_toss::game_logic::turn_state::TurnState;
+        use specs::WorldExt;
+
+        let player_entity = match self.get_player_entity() {
+            Some(e) => e,
+            None => return,
+        };
+
+        // Mark player as ready to advance turn
+        // PathExecutionSystem will automatically create action from PlannedPath (if exists)
+        // Otherwise, this just ends the player's turn
+        let mut turn_state = self.world.write_resource::<TurnState>();
+        turn_state.mark_entity_ready(player_entity);
+        drop(turn_state);
+
+        // Check if player has a planned path
+        let paths = self.world.read_storage::<PlannedPath>();
+        let has_path = paths.get(player_entity).is_some();
+        drop(paths);
+
+        if has_path {
+            self.world
+                .write_resource::<EventLog>()
+                .add("Advancing along path...".to_string());
+        } else {
+            self.world
+                .write_resource::<EventLog>()
+                .add("Waiting...".to_string());
+        }
+    }
+
     fn commit_player_action(&mut self, dx: i32, dy: i32) {
         use argue_the_toss::components::action::{ActionType, QueuedAction};
         use argue_the_toss::game_logic::turn_state::TurnState;
@@ -282,6 +360,16 @@ impl GameState {
             Some(e) => e,
             None => return,
         };
+
+        // Clear any existing planned path when manually moving
+        {
+            let mut paths = self.world.write_storage::<PlannedPath>();
+            if paths.remove(player_entity).is_some() {
+                self.world
+                    .write_resource::<EventLog>()
+                    .add("Planned path cancelled".to_string());
+            }
+        }
 
         // Get current position to calculate terrain cost
         let positions = self.world.read_storage::<Position>();
@@ -508,6 +596,9 @@ fn ui(f: &mut Frame, state: &GameState) {
     let battlefield_widget = BattlefieldWidget::new(&state.battlefield, &state.camera);
     f.render_widget(battlefield_widget, inner_area);
 
+    // Render planned paths (before soldiers so they appear underneath)
+    render_paths(f, inner_area, state);
+
     // Render soldiers on top
     render_soldiers(f, inner_area, state);
 
@@ -612,6 +703,48 @@ fn ui(f: &mut Frame, state: &GameState) {
     f.render_widget(info_paragraph, main_chunks[1]);
 }
 
+fn render_paths(f: &mut Frame, area: Rect, state: &GameState) {
+    let entities = state.world.entities();
+    let paths = state.world.read_storage::<PlannedPath>();
+
+    let top_left = state.camera.top_left();
+
+    for (_entity, path) in (&entities, &paths).join() {
+        // Only render paths with preview enabled
+        if !path.show_preview {
+            continue;
+        }
+
+        for (i, pos) in path.steps.iter().enumerate() {
+            let screen_x = pos.x - top_left.x;
+            let screen_y = pos.y - top_left.y;
+
+            // Only render if within viewport
+            if screen_x >= 0
+                && screen_x < area.width as i32
+                && screen_y >= 0
+                && screen_y < area.height as i32
+            {
+                let buf_x = area.x + screen_x as u16;
+                let buf_y = area.y + screen_y as u16;
+
+                if buf_x < area.right() && buf_y < area.bottom() {
+                    // Show numbered path (1-9, then +)
+                    let ch = if i < 9 {
+                        char::from_digit((i + 1) as u32, 10).unwrap()
+                    } else {
+                        '+'
+                    };
+
+                    f.buffer_mut()[(buf_x, buf_y)]
+                        .set_char(ch)
+                        .set_style(Style::default().fg(Color::Cyan).bg(Color::DarkGray));
+                }
+            }
+        }
+    }
+}
+
 fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
     let entities = state.world.entities();
     let positions = state.world.read_storage::<Position>();
@@ -694,7 +827,8 @@ fn main() -> Result<(), io::Error> {
 
     // Create ECS dispatcher for turn-based systems
     let mut dispatcher = DispatcherBuilder::new()
-        .with(AIActionPlannerSystem, "ai_planner", &[])
+        .with(PathExecutionSystem, "path_execution", &[])
+        .with(AIActionPlannerSystem, "ai_planner", &["path_execution"])
         .with(ActionExecutionSystem, "action_execution", &[])
         .with(TurnManagerSystem, "turn_manager", &["action_execution"])
         .build();
