@@ -18,3 +18,6 @@ pub mod simulation;
 
 // Utilities
 pub mod utils;
+
+// Configuration
+pub mod config;

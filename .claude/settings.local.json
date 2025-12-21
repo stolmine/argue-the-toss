@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(cargo init:*)",
+      "WebSearch",
+      "WebFetch(domain:crates.io)",
+      "WebFetch(domain:docs.rs)",
+      "Bash(cargo build:*)",
+      "Bash(cargo run:*)",
+      "Bash(ls:*)",
+      "Bash(timeout 5 cargo run)"
+    ]
+  }
+}

@@ -2,9 +2,23 @@
 // Main entry point
 
 use argue_the_toss::{
-    components::{player::Player, position::Position, soldier::{Faction, Rank, Soldier}},
-    game_logic::battlefield::{Battlefield, Position as BattlefieldPos, TerrainType},
+    components::{
+        action::{OngoingAction, QueuedAction},
+        player::Player,
+        position::Position,
+        soldier::{Faction, Rank, Soldier},
+        time_budget::TimeBudget,
+    },
+    config::game_config::GameConfig,
+    game_logic::{
+        battlefield::{Battlefield, Position as BattlefieldPos, TerrainType},
+        turn_state::TurnState,
+    },
     rendering::{viewport::Camera, widgets::BattlefieldWidget},
+    systems::{
+        action_execution::ActionExecutionSystem, ai_action_planner::AIActionPlannerSystem,
+        turn_manager::TurnManagerSystem,
+    },
     utils::{event_log::EventLog, input_mode::InputMode},
 };
 use crossterm::{
@@ -20,7 +34,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame, Terminal,
 };
-use specs::{Builder, Join, World, WorldExt};
+use specs::{Builder, DispatcherBuilder, Join, World, WorldExt};
 use std::io;
 
 /// Main game state
@@ -31,7 +45,7 @@ struct GameState {
     running: bool,
     input_mode: InputMode,
     cursor_pos: BattlefieldPos, // For Look mode
-    event_log: EventLog,
+    config: GameConfig,
 }
 
 impl GameState {
@@ -42,6 +56,21 @@ impl GameState {
         world.register::<Position>();
         world.register::<Soldier>();
         world.register::<Player>();
+        world.register::<TimeBudget>();
+        world.register::<QueuedAction>();
+        world.register::<OngoingAction>();
+
+        // Create game config
+        let config = GameConfig::default();
+
+        // Create event log
+        let mut event_log = EventLog::new();
+        event_log.add("Welcome to Argue the Toss!".to_string());
+        event_log.add("WWI Trench Warfare Roguelike".to_string());
+
+        // Insert resources
+        world.insert(TurnState::new());
+        world.insert(event_log);
 
         // Create battlefield (100x100 grid)
         let mut battlefield = Battlefield::new(100, 100);
@@ -84,6 +113,7 @@ impl GameState {
                 rank: Rank::Private,
             })
             .with(Player)
+            .with(TimeBudget::new(config.time_budget_seconds))
             .build();
 
         world
@@ -94,6 +124,7 @@ impl GameState {
                 faction: Faction::Allies,
                 rank: Rank::Sergeant,
             })
+            .with(TimeBudget::new(config.time_budget_seconds))
             .build();
 
         world
@@ -104,11 +135,8 @@ impl GameState {
                 faction: Faction::CentralPowers,
                 rank: Rank::Private,
             })
+            .with(TimeBudget::new(config.time_budget_seconds))
             .build();
-
-        let mut event_log = EventLog::new();
-        event_log.add("Welcome to Argue the Toss!".to_string());
-        event_log.add("WWI Trench Warfare Roguelike".to_string());
 
         Self {
             world,
@@ -117,7 +145,7 @@ impl GameState {
             running: true,
             input_mode: InputMode::default(),
             cursor_pos: player_start_pos,
-            event_log,
+            config,
         }
     }
 
@@ -160,11 +188,11 @@ impl GameState {
                         .constrain(self.battlefield.width(), self.battlefield.height());
                 }
             }
-            // Movement keys - move player
-            KeyCode::Up | KeyCode::Char('k') => self.move_player(0, -1),
-            KeyCode::Down | KeyCode::Char('j') => self.move_player(0, 1),
-            KeyCode::Left | KeyCode::Char('h') => self.move_player(-1, 0),
-            KeyCode::Right | KeyCode::Char('l') => self.move_player(1, 0),
+            // Movement keys - commit movement actions
+            KeyCode::Up | KeyCode::Char('k') => self.commit_player_action(0, -1),
+            KeyCode::Down | KeyCode::Char('j') => self.commit_player_action(0, 1),
+            KeyCode::Left | KeyCode::Char('h') => self.commit_player_action(-1, 0),
+            KeyCode::Right | KeyCode::Char('l') => self.commit_player_action(1, 0),
             _ => {}
         }
     }
@@ -220,6 +248,75 @@ impl GameState {
         }
     }
 
+    fn commit_player_action(&mut self, dx: i32, dy: i32) {
+        use argue_the_toss::components::action::{ActionType, QueuedAction};
+        use argue_the_toss::game_logic::turn_state::TurnState;
+        use specs::WorldExt;
+
+        let player_entity = match self.get_player_entity() {
+            Some(e) => e,
+            None => return,
+        };
+
+        // Get current position to calculate terrain cost
+        let positions = self.world.read_storage::<Position>();
+        let current_pos = match positions.get(player_entity) {
+            Some(pos) => *pos,
+            None => return,
+        };
+        drop(positions);
+
+        // Calculate target position and get terrain cost
+        let new_x = current_pos.x() + dx;
+        let new_y = current_pos.y() + dy;
+        let new_pos = BattlefieldPos::new(new_x, new_y);
+
+        // Check if new position is valid
+        if !self.battlefield.in_bounds(&new_pos) {
+            self.world.write_resource::<EventLog>().add("Cannot move out of bounds!".to_string());
+            return;
+        }
+
+        let terrain_cost = self
+            .battlefield
+            .get_tile(&new_pos)
+            .map(|t| t.terrain.movement_cost())
+            .unwrap_or(1.0);
+
+        // Create movement action
+        let action_type = ActionType::Move {
+            dx,
+            dy,
+            terrain_cost,
+        };
+        let time_cost = action_type.base_time_cost();
+
+        // Commit action
+        let mut time_budgets = self.world.write_storage::<TimeBudget>();
+        let mut queued_actions = self.world.write_storage::<QueuedAction>();
+
+        if let Some(budget) = time_budgets.get_mut(player_entity) {
+            budget.consume_time(time_cost);
+
+            queued_actions
+                .insert(player_entity, QueuedAction::new(action_type))
+                .ok();
+
+            self.world.write_resource::<EventLog>()
+                .add(format!("Movement queued ({:.1}s)", time_cost));
+
+            // Check if turn should end (budget exhausted or in debt)
+            if budget.available_time() <= 0.0 {
+                let mut turn_state = self.world.write_resource::<TurnState>();
+                turn_state.mark_entity_ready(player_entity);
+
+                self.world.write_resource::<EventLog>()
+                    .add("Time budget exhausted. Waiting for others...".to_string());
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     fn move_player(&mut self, dx: i32, dy: i32) {
         let mut positions = self.world.write_storage::<Position>();
         let players = self.world.read_storage::<Player>();
@@ -250,6 +347,17 @@ impl GameState {
 
         for (_player, pos) in (&players, &positions).join() {
             return Some(*pos.as_battlefield_pos());
+        }
+        None
+    }
+
+    fn get_player_entity(&self) -> Option<specs::Entity> {
+        use specs::Join;
+        let players = self.world.read_storage::<Player>();
+        let entities = self.world.entities();
+
+        for (entity, _) in (&entities, &players).join() {
+            return Some(entity);
         }
         None
     }
@@ -373,11 +481,14 @@ fn ui(f: &mut Frame, state: &GameState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let recent_events = state.event_log.recent(15);
-    let event_lines: Vec<Line> = recent_events
-        .iter()
-        .map(|e| Line::from(e.as_str()))
-        .collect();
+    let event_lines: Vec<Line> = {
+        let event_log = state.world.fetch::<EventLog>();
+        event_log
+            .recent(15)
+            .iter()
+            .map(|e| Line::from(e.to_string()))
+            .collect()
+    };
 
     let event_paragraph = Paragraph::new(Text::from(event_lines)).block(event_log_block);
     f.render_widget(event_paragraph, top_chunks[1]);
@@ -397,6 +508,40 @@ fn ui(f: &mut Frame, state: &GameState) {
         Line::from(state.input_mode.help_text()),
         Line::from(""),
     ];
+
+    // Show time budget for player
+    if let Some(player_entity) = state.get_player_entity() {
+        let time_budgets = state.world.read_storage::<TimeBudget>();
+        let turn_state = state.world.fetch::<TurnState>();
+
+        if let Some(budget) = time_budgets.get(player_entity) {
+            let available = budget.available_time();
+            let budget_color = if budget.time_debt < 0.0 {
+                "DEBT"
+            } else if available > 3.0 {
+                "Good"
+            } else if available > 1.0 {
+                "Low"
+            } else {
+                "Critical"
+            };
+
+            let time_info = if budget.time_debt < 0.0 {
+                format!(
+                    "Turn {} | Time: {:.1}s ({}) | Debt: {:.1}s",
+                    turn_state.current_turn, available, budget_color, -budget.time_debt
+                )
+            } else {
+                format!(
+                    "Turn {} | Time: {:.1}s ({})",
+                    turn_state.current_turn, available, budget_color
+                )
+            };
+
+            info_lines.push(Line::from(time_info));
+            info_lines.push(Line::from(""));
+        }
+    }
 
     // Show terrain info for player position or cursor position
     let inspect_pos = if state.input_mode == InputMode::Look {
@@ -506,6 +651,13 @@ fn main() -> Result<(), io::Error> {
     // Create game state with adaptive viewport
     let mut game_state = GameState::new(initial_width, initial_height);
 
+    // Create ECS dispatcher for turn-based systems
+    let mut dispatcher = DispatcherBuilder::new()
+        .with(AIActionPlannerSystem, "ai_planner", &[])
+        .with(ActionExecutionSystem, "action_execution", &[])
+        .with(TurnManagerSystem, "turn_manager", &["action_execution"])
+        .build();
+
     // Main game loop
     while game_state.running {
         // Update visibility
@@ -518,10 +670,35 @@ fn main() -> Result<(), io::Error> {
             ui(f, &game_state)
         })?;
 
-        // Handle input
+        // Run ECS systems (process turns, AI, actions)
+        dispatcher.dispatch(&game_state.world);
+        game_state.world.maintain();
+
+        // Handle input (only in planning phase)
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                game_state.handle_input(key);
+                let turn_state = game_state.world.fetch::<TurnState>();
+                let can_input = matches!(turn_state.phase, argue_the_toss::game_logic::turn_state::TurnPhase::Planning);
+
+                // In PlayerFirst mode, only accept input if player hasn't finished
+                let player_can_act = if matches!(
+                    turn_state.turn_order_mode,
+                    argue_the_toss::game_logic::turn_state::TurnOrderMode::PlayerFirst
+                ) {
+                    if let Some(player_entity) = game_state.get_player_entity() {
+                        !turn_state.is_entity_ready(player_entity)
+                    } else {
+                        false
+                    }
+                } else {
+                    true // In other modes, player can always act during Planning
+                };
+
+                drop(turn_state); // Release borrow
+
+                if can_input && player_can_act {
+                    game_state.handle_input(key);
+                }
             }
         }
     }
