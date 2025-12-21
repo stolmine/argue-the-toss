@@ -32,6 +32,11 @@ A turn-based TUI roguelike inspired by Running with Rifles, focusing on individu
 - **Artillery & Vehicles**
   - Artillery support mechanics
   - Vehicle units (tanks, transports)
+- **Emplacements**
+  - Mortars
+  - Machine Guns
+  - Bunkers
+  - Foxholes
 
 ### Tactical & Strategic Systems
 - **Squad Management**
