@@ -10,7 +10,10 @@
       "Bash(cargo build:*)",
       "Bash(cargo run:*)",
       "Bash(ls:*)",
-      "Bash(timeout 5 cargo run)"
+      "Bash(timeout 5 cargo run)",
+      "Bash(cargo tree:*)",
+      "Bash(wc:*)",
+      "Bash(cargo doc:*)"
     ]
   }
 }

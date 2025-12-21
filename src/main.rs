@@ -8,6 +8,7 @@ use argue_the_toss::{
         position::Position,
         soldier::{Faction, Rank, Soldier},
         time_budget::TimeBudget,
+        vision::Vision,
     },
     config::game_config::GameConfig,
     game_logic::{
@@ -59,6 +60,7 @@ impl GameState {
         world.register::<TimeBudget>();
         world.register::<QueuedAction>();
         world.register::<OngoingAction>();
+        world.register::<Vision>();
 
         // Create game config
         let config = GameConfig::default();
@@ -96,6 +98,26 @@ impl GameState {
             }
         }
 
+        // Add some trees (blocks LOS)
+        for y in 30..35 {
+            for x in 45..50 {
+                battlefield.set_terrain(
+                    BattlefieldPos::new(x, y),
+                    TerrainType::Tree,
+                );
+            }
+        }
+
+        // Add a civilian building (blocks LOS)
+        for y in 60..65 {
+            for x in 50..55 {
+                battlefield.set_terrain(
+                    BattlefieldPos::new(x, y),
+                    TerrainType::CivilianBuilding,
+                );
+            }
+        }
+
         // Player starting position
         let player_start_pos = BattlefieldPos::new(50, 50);
 
@@ -114,6 +136,7 @@ impl GameState {
             })
             .with(Player)
             .with(TimeBudget::new(config.time_budget_seconds))
+            .with(Vision::new(10))
             .build();
 
         world
@@ -125,6 +148,7 @@ impl GameState {
                 rank: Rank::Sergeant,
             })
             .with(TimeBudget::new(config.time_budget_seconds))
+            .with(Vision::new(10))
             .build();
 
         world
@@ -136,6 +160,7 @@ impl GameState {
                 rank: Rank::Private,
             })
             .with(TimeBudget::new(config.time_budget_seconds))
+            .with(Vision::new(10))
             .build();
 
         Self {
@@ -383,6 +408,8 @@ impl GameState {
                 TerrainType::NoMansLand => "No Man's Land",
                 TerrainType::Mud => "Mud",
                 TerrainType::Fortification => "Fortification",
+                TerrainType::Tree => "Tree",
+                TerrainType::CivilianBuilding => "Civilian Building",
             };
             let visibility = if tile.visible {
                 "visible"
@@ -418,19 +445,33 @@ impl GameState {
     }
 
     fn update_visibility(&mut self) {
-        // Reset all visibility
+        use argue_the_toss::game_logic::line_of_sight::calculate_fov;
+        use specs::Join;
+
+        // Reset all visibility flags
         self.battlefield.reset_visibility();
 
-        // Make all tiles within viewport visible (simplified FOV)
-        let top_left = self.camera.top_left();
-        let bottom_right = self.camera.bottom_right();
+        // Calculate FOV for player
+        if let Some(player_pos) = self.get_player_position() {
+            // Get player's vision range
+            let vision_range = {
+                let players = self.world.read_storage::<Player>();
+                let visions = self.world.read_storage::<Vision>();
+                let entities = self.world.entities();
 
-        for y in top_left.y..=bottom_right.y {
-            for x in top_left.x..=bottom_right.x {
-                let pos = BattlefieldPos::new(x, y);
-                if self.battlefield.in_bounds(&pos) {
-                    self.battlefield.set_visible(pos, true);
-                }
+                (&entities, &players, &visions)
+                    .join()
+                    .next()
+                    .map(|(_, _, vision)| vision.range)
+                    .unwrap_or(10) // Default 10 if no vision component
+            };
+
+            // Calculate visible tiles
+            let visible_tiles = calculate_fov(&player_pos, vision_range, &self.battlefield);
+
+            // Mark all visible tiles
+            for pos in visible_tiles {
+                self.battlefield.set_visible(pos, true);
             }
         }
     }

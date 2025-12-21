@@ -12,6 +12,7 @@ ratatui = { version = "0.29.0", features = ["all-widgets", "serde"] }
 crossterm = "0.28.1"
 
 # Roguelike Utilities (Pathfinding, FOV)
+bracket-lib = "0.8.7"
 bracket-pathfinding = "0.8.7"
 
 # Entity Component System

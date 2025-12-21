@@ -28,6 +28,8 @@ pub enum TerrainType {
     NoMansLand,
     Mud,
     Fortification,
+    Tree,
+    CivilianBuilding,
 }
 
 impl TerrainType {
@@ -38,7 +40,17 @@ impl TerrainType {
             TerrainType::NoMansLand => 1.5,
             TerrainType::Mud => 2.0,
             TerrainType::Fortification => 0.5,
+            TerrainType::Tree => 1.8,
+            TerrainType::CivilianBuilding => 0.8,
         }
+    }
+
+    /// Returns whether this terrain blocks line of sight
+    pub fn blocks_los(&self) -> bool {
+        matches!(
+            self,
+            TerrainType::Fortification | TerrainType::Tree | TerrainType::CivilianBuilding
+        )
     }
 
     /// Returns the ASCII character representation
@@ -48,6 +60,8 @@ impl TerrainType {
             TerrainType::NoMansLand => '.',
             TerrainType::Mud => '~',
             TerrainType::Fortification => '▓',
+            TerrainType::Tree => '♣',
+            TerrainType::CivilianBuilding => '▓',
         }
     }
 }

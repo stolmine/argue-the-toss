@@ -6,6 +6,7 @@ pub mod player;
 pub mod position;
 pub mod soldier;
 pub mod time_budget;
+pub mod vision;
 
 // Future components will be added here as submodules:
 // pub mod weapon;
