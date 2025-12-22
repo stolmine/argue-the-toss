@@ -14,7 +14,12 @@
       "Bash(cargo tree:*)",
       "Bash(wc:*)",
       "Bash(cargo doc:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(cargo add:*)",
+      "Bash(cargo check:*)",
+      "Bash(timeout 3 cargo run:*)"
     ]
   }
 }

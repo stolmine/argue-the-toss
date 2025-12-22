@@ -4,12 +4,15 @@
 use argue_the_toss::{
     components::{
         action::{OngoingAction, QueuedAction},
+        dead::Dead,
+        health::Health,
         pathfinding::PlannedPath,
         player::Player,
         position::Position,
         soldier::{Faction, Rank, Soldier},
         time_budget::TimeBudget,
         vision::Vision,
+        weapon::Weapon,
     },
     config::game_config::GameConfig,
     game_logic::{
@@ -64,6 +67,9 @@ impl GameState {
         world.register::<OngoingAction>();
         world.register::<Vision>();
         world.register::<PlannedPath>();
+        world.register::<Weapon>();
+        world.register::<Health>();
+        world.register::<Dead>();
 
         // Create game config
         let config = GameConfig::default();
@@ -143,8 +149,11 @@ impl GameState {
             .with(Player)
             .with(TimeBudget::new(config.time_budget_seconds))
             .with(Vision::new(10))
+            .with(Weapon::rifle())
+            .with(Health::soldier())
             .build();
 
+        // Allied NPC
         world
             .create_entity()
             .with(Position::new(55, 52))
@@ -155,8 +164,11 @@ impl GameState {
             })
             .with(TimeBudget::new(config.time_budget_seconds))
             .with(Vision::new(10))
+            .with(Weapon::rifle())
+            .with(Health::soldier())
             .build();
 
+        // Enemy NPC 1
         world
             .create_entity()
             .with(Position::new(45, 48))
@@ -167,6 +179,23 @@ impl GameState {
             })
             .with(TimeBudget::new(config.time_budget_seconds))
             .with(Vision::new(10))
+            .with(Weapon::rifle())
+            .with(Health::soldier())
+            .build();
+
+        // Enemy NPC 2 (for testing)
+        world
+            .create_entity()
+            .with(Position::new(43, 50))
+            .with(Soldier {
+                name: "Cpl. Schmidt".to_string(),
+                faction: Faction::CentralPowers,
+                rank: Rank::Corporal,
+            })
+            .with(TimeBudget::new(config.time_budget_seconds))
+            .with(Vision::new(10))
+            .with(Weapon::rifle())
+            .with(Health::soldier())
             .build();
 
         Self {
@@ -197,6 +226,7 @@ impl GameState {
         match self.input_mode {
             InputMode::Command => self.handle_command_mode(key),
             InputMode::Look => self.handle_look_mode(key),
+            InputMode::Targeting => self.handle_targeting_mode(key),
         }
     }
 
@@ -222,6 +252,18 @@ impl GameState {
             KeyCode::Char(' ') => {
                 // Space: Advance turn (PathExecutionSystem will handle path step execution)
                 self.advance_turn();
+            }
+            KeyCode::Char('f') => {
+                // Enter targeting mode for shooting
+                self.input_mode = InputMode::Targeting;
+                // Set cursor to player position
+                if let Some(player_pos) = self.get_player_position() {
+                    self.cursor_pos = player_pos;
+                }
+            }
+            KeyCode::Char('r') => {
+                // Reload weapon
+                self.player_reload();
             }
             // Movement keys - commit movement actions
             KeyCode::Up | KeyCode::Char('k') => self.commit_player_action(0, -1),
@@ -316,6 +358,101 @@ impl GameState {
                     .constrain(self.battlefield.width(), self.battlefield.height());
             }
             _ => {}
+        }
+    }
+
+    fn handle_targeting_mode(&mut self, key: KeyEvent) {
+        use argue_the_toss::components::action::{ActionType, QueuedAction};
+        use specs::{Join, WorldExt};
+
+        match key.code {
+            KeyCode::Esc => {
+                // Cancel targeting and return to Command mode
+                self.input_mode = InputMode::Command;
+            }
+            KeyCode::Enter => {
+                // Find entity at cursor position and shoot at it
+                let target_entity = {
+                    let positions = self.world.read_storage::<Position>();
+                    let soldiers = self.world.read_storage::<Soldier>();
+                    let entities = self.world.entities();
+
+                    (&entities, &positions, &soldiers)
+                        .join()
+                        .find(|(_, pos, _)| pos.x() == self.cursor_pos.x && pos.y() == self.cursor_pos.y)
+                        .map(|(entity, _, _)| entity)
+                };
+
+                if let Some(target) = target_entity {
+                    // Queue shoot action for player
+                    if let Some(player_entity) = self.get_player_entity() {
+                        let action = QueuedAction::new(ActionType::Shoot { target });
+                        let mut actions = self.world.write_storage::<QueuedAction>();
+                        actions.insert(player_entity, action).ok();
+
+                        let mut log = self.world.write_resource::<EventLog>();
+                        log.add("Shoot action queued.".to_string());
+                    }
+                } else {
+                    let mut log = self.world.write_resource::<EventLog>();
+                    log.add("No target at cursor position!".to_string());
+                }
+
+                // Return to Command mode
+                self.input_mode = InputMode::Command;
+            }
+            KeyCode::Char('c') => {
+                // Center camera on player
+                if let Some(player_pos) = self.get_player_position() {
+                    self.camera.center_on(player_pos);
+                    self.camera
+                        .constrain(self.battlefield.width(), self.battlefield.height());
+                }
+            }
+            // Movement keys - move cursor AND camera in Targeting mode
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.cursor_pos.y -= 1;
+                self.constrain_cursor();
+                self.camera.pan(0, -1);
+                self.camera
+                    .constrain(self.battlefield.width(), self.battlefield.height());
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.cursor_pos.y += 1;
+                self.constrain_cursor();
+                self.camera.pan(0, 1);
+                self.camera
+                    .constrain(self.battlefield.width(), self.battlefield.height());
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.cursor_pos.x -= 1;
+                self.constrain_cursor();
+                self.camera.pan(-1, 0);
+                self.camera
+                    .constrain(self.battlefield.width(), self.battlefield.height());
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.cursor_pos.x += 1;
+                self.constrain_cursor();
+                self.camera.pan(1, 0);
+                self.camera
+                    .constrain(self.battlefield.width(), self.battlefield.height());
+            }
+            _ => {}
+        }
+    }
+
+    fn player_reload(&mut self) {
+        use argue_the_toss::components::action::{ActionType, QueuedAction};
+        use specs::WorldExt;
+
+        if let Some(player_entity) = self.get_player_entity() {
+            let action = QueuedAction::new(ActionType::Reload);
+            let mut actions = self.world.write_storage::<QueuedAction>();
+            actions.insert(player_entity, action).ok();
+
+            let mut log = self.world.write_resource::<EventLog>();
+            log.add("Reload action queued.".to_string());
         }
     }
 
@@ -566,23 +703,32 @@ impl GameState {
 }
 
 fn ui(f: &mut Frame, state: &GameState) {
-    // Main layout: Top (battlefield + event log) and Bottom (info panel)
+    // Main layout: Top (battlefield + right pane) and Bottom (info panel)
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(10),      // Top: battlefield + event log
+            Constraint::Min(10),      // Top: battlefield + right pane
             Constraint::Length(7),    // Bottom: info panel
         ])
         .split(f.area());
 
-    // Top split: Battlefield (left) and Event Log (right)
+    // Top split: Battlefield (left), Event Log + Context Info (right)
     let top_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Percentage(75),  // Battlefield
-            Constraint::Percentage(25),  // Event log
+            Constraint::Percentage(25),  // Right pane (event log + context)
         ])
         .split(main_chunks[0]);
+
+    // Split right pane vertically into Event Log (top) and Context Info (bottom)
+    let right_pane_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(60),  // Event Log
+            Constraint::Percentage(40),  // Context Info (cursor/target)
+        ])
+        .split(top_chunks[1]);
 
     // Render battlefield
     let battlefield_block = Block::default()
@@ -602,12 +748,14 @@ fn ui(f: &mut Frame, state: &GameState) {
     // Render soldiers on top
     render_soldiers(f, inner_area, state);
 
-    // Render cursor in Look mode
+    // Render cursor in Look mode or Targeting mode
     if state.input_mode == InputMode::Look {
         render_cursor(f, inner_area, state);
+    } else if state.input_mode == InputMode::Targeting {
+        render_targeting_cursor(f, inner_area, state);
     }
 
-    // Render event log
+    // Render event log (top of right pane)
     let event_log_block = Block::default()
         .title("Event Log")
         .borders(Borders::ALL)
@@ -623,16 +771,20 @@ fn ui(f: &mut Frame, state: &GameState) {
     };
 
     let event_paragraph = Paragraph::new(Text::from(event_lines)).block(event_log_block);
-    f.render_widget(event_paragraph, top_chunks[1]);
+    f.render_widget(event_paragraph, right_pane_chunks[0]);
 
-    // Render info panel
+    // Render context info (bottom of right pane)
+    render_context_info(f, right_pane_chunks[1], state);
+
+    // Render player info panel (bottom)
     let mode_color = match state.input_mode {
         InputMode::Command => Color::Green,
         InputMode::Look => Color::Yellow,
+        InputMode::Targeting => Color::Red,
     };
 
     let info_block = Block::default()
-        .title(format!("Mode: {} | Info", state.input_mode.name()))
+        .title(format!("Mode: {} | Player Info", state.input_mode.name()))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(mode_color));
 
@@ -641,14 +793,57 @@ fn ui(f: &mut Frame, state: &GameState) {
         Line::from(""),
     ];
 
-    // Show time budget for player
+    // Show player info
     if let Some(player_entity) = state.get_player_entity() {
+        let positions = state.world.read_storage::<Position>();
         let time_budgets = state.world.read_storage::<TimeBudget>();
+        let weapons = state.world.read_storage::<Weapon>();
+        let healths = state.world.read_storage::<Health>();
         let turn_state = state.world.fetch::<TurnState>();
 
+        // Player position
+        if let Some(pos) = positions.get(player_entity) {
+            info_lines.push(Line::from(format!(
+                "Position: ({}, {})",
+                pos.x(), pos.y()
+            )));
+        }
+
+        // Player HP with color coding
+        if let Some(health) = healths.get(player_entity) {
+            let hp_percent = health.percentage();
+            let hp_color_name = if hp_percent > 0.7 {
+                "GREEN"
+            } else if hp_percent > 0.3 {
+                "YELLOW"
+            } else {
+                "RED"
+            };
+
+            info_lines.push(Line::from(format!(
+                "HP: {}/{} ({}%) [{}]",
+                health.current,
+                health.maximum,
+                health.percentage_display(),
+                hp_color_name
+            )));
+        }
+
+        // Weapon info
+        if let Some(weapon) = weapons.get(player_entity) {
+            info_lines.push(Line::from(format!(
+                "Weapon: {} | Ammo: {}/{} ({:.0}%)",
+                weapon.stats.name,
+                weapon.ammo.current,
+                weapon.ammo.max_capacity,
+                weapon.ammo.percentage()
+            )));
+        }
+
+        // Time budget
         if let Some(budget) = time_budgets.get(player_entity) {
             let available = budget.available_time();
-            let budget_color = if budget.time_debt < 0.0 {
+            let budget_status = if budget.time_debt < 0.0 {
                 "DEBT"
             } else if available > 3.0 {
                 "Good"
@@ -661,46 +856,181 @@ fn ui(f: &mut Frame, state: &GameState) {
             let time_info = if budget.time_debt < 0.0 {
                 format!(
                     "Turn {} | Time: {:.1}s ({}) | Debt: {:.1}s",
-                    turn_state.current_turn, available, budget_color, -budget.time_debt
+                    turn_state.current_turn, available, budget_status, -budget.time_debt
                 )
             } else {
                 format!(
                     "Turn {} | Time: {:.1}s ({})",
-                    turn_state.current_turn, available, budget_color
+                    turn_state.current_turn, available, budget_status
                 )
             };
 
             info_lines.push(Line::from(time_info));
-            info_lines.push(Line::from(""));
-        }
-    }
-
-    // Show terrain info for player position or cursor position
-    let inspect_pos = if state.input_mode == InputMode::Look {
-        state.cursor_pos
-    } else {
-        state.get_player_position().unwrap_or(state.cursor_pos)
-    };
-
-    info_lines.push(Line::from(format!(
-        "Position: ({}, {})",
-        inspect_pos.x, inspect_pos.y
-    )));
-    info_lines.push(Line::from(format!(
-        "Terrain: {}",
-        state.get_terrain_info(&inspect_pos)
-    )));
-
-    // In Look mode, show entity info if any
-    if state.input_mode == InputMode::Look {
-        if let Some(entity_info) = state.get_entity_info(&state.cursor_pos) {
-            info_lines.push(Line::from(""));
-            info_lines.push(Line::from(format!("Entity: {}", entity_info)));
         }
     }
 
     let info_paragraph = Paragraph::new(Text::from(info_lines)).block(info_block);
     f.render_widget(info_paragraph, main_chunks[1]);
+}
+
+/// Render context-sensitive information (cursor/target details)
+fn render_context_info(f: &mut Frame, area: Rect, state: &GameState) {
+    use specs::{Join, WorldExt};
+
+    let title = match state.input_mode {
+        InputMode::Look => "Cursor Info",
+        InputMode::Targeting => "Target Info",
+        InputMode::Command => "Context",
+    };
+
+    let context_block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta));
+
+    let mut context_lines = vec![];
+
+    // Get the position to inspect
+    let inspect_pos = if state.input_mode == InputMode::Look || state.input_mode == InputMode::Targeting {
+        state.cursor_pos
+    } else {
+        state.get_player_position().unwrap_or(state.cursor_pos)
+    };
+
+    // Show position
+    context_lines.push(Line::from(format!(
+        "Position: ({}, {})",
+        inspect_pos.x, inspect_pos.y
+    )));
+
+    // Show terrain info
+    context_lines.push(Line::from(format!(
+        "Terrain: {}",
+        state.get_terrain_info(&inspect_pos)
+    )));
+
+    context_lines.push(Line::from(""));
+
+    // Show entity info at cursor/target position
+    let positions = state.world.read_storage::<Position>();
+    let soldiers = state.world.read_storage::<Soldier>();
+    let healths = state.world.read_storage::<Health>();
+    let weapons = state.world.read_storage::<Weapon>();
+    let players = state.world.read_storage::<Player>();
+    let entities = state.world.entities();
+
+    // Find entity at inspect position
+    let entity_at_pos = (&entities, &positions, &soldiers)
+        .join()
+        .find(|(_, pos, _)| pos.x() == inspect_pos.x && pos.y() == inspect_pos.y);
+
+    if let Some((entity, _, soldier)) = entity_at_pos {
+        let is_player = players.contains(entity);
+        let player_marker = if is_player { " (YOU)" } else { "" };
+
+        context_lines.push(Line::from(format!(
+            "Unit: {}{}",
+            soldier.name, player_marker
+        )));
+        context_lines.push(Line::from(format!(
+            "Faction: {:?}",
+            soldier.faction
+        )));
+        context_lines.push(Line::from(format!(
+            "Rank: {}",
+            soldier.rank.as_str()
+        )));
+
+        // Show HP if entity is visible (or if it's the player)
+        if is_player {
+            if let Some(health) = healths.get(entity) {
+                let hp_percent = health.percentage();
+                let hp_status = if hp_percent > 0.7 {
+                    "Healthy"
+                } else if hp_percent > 0.3 {
+                    "Wounded"
+                } else {
+                    "Critical"
+                };
+
+                context_lines.push(Line::from(format!(
+                    "HP: {}/{} ({}%)",
+                    health.current,
+                    health.maximum,
+                    health.percentage_display()
+                )));
+                context_lines.push(Line::from(format!("Status: {}", hp_status)));
+            }
+        } else {
+            // For other entities, check if tile is visible
+            if let Some(tile) = state.battlefield.get_tile(&inspect_pos) {
+                if tile.visible {
+                    if let Some(health) = healths.get(entity) {
+                        context_lines.push(Line::from(format!(
+                            "HP: {}/{} ({}%)",
+                            health.current,
+                            health.maximum,
+                            health.percentage_display()
+                        )));
+                    }
+                } else {
+                    context_lines.push(Line::from("HP: ???"));
+                }
+            }
+        }
+
+        // Show weapon info if visible or player
+        if is_player {
+            if let Some(weapon) = weapons.get(entity) {
+                context_lines.push(Line::from(format!(
+                    "Weapon: {}",
+                    weapon.stats.name
+                )));
+            }
+        } else if let Some(tile) = state.battlefield.get_tile(&inspect_pos) {
+            if tile.visible {
+                if let Some(weapon) = weapons.get(entity) {
+                    context_lines.push(Line::from(format!(
+                        "Weapon: {}",
+                        weapon.stats.name
+                    )));
+                }
+            }
+        }
+    } else {
+        context_lines.push(Line::from("No entity here"));
+    }
+
+    // In Targeting mode, show additional targeting info
+    if state.input_mode == InputMode::Targeting {
+        context_lines.push(Line::from(""));
+        context_lines.push(Line::from("--- Targeting ---"));
+
+        let validation = validate_target(state);
+        let status_msg = match validation {
+            TargetValidation::Valid => "VALID TARGET (X)",
+            TargetValidation::NoTarget => "No target (+)",
+            TargetValidation::Friendly => "FRIENDLY (!)",
+            TargetValidation::OutOfRange => "OUT OF RANGE (?)",
+            TargetValidation::NoLineOfSight => "NO LINE OF SIGHT (/)",
+        };
+        context_lines.push(Line::from(format!("Status: {}", status_msg)));
+
+        // Show weapon range
+        if let Some(player_entity) = state.get_player_entity() {
+            let weapons = state.world.read_storage::<Weapon>();
+            if let Some(weapon) = weapons.get(player_entity) {
+                context_lines.push(Line::from(format!(
+                    "Range: {}/{} tiles",
+                    weapon.stats.effective_range,
+                    weapon.stats.max_range
+                )));
+            }
+        }
+    }
+
+    let context_paragraph = Paragraph::new(Text::from(context_lines)).block(context_block);
+    f.render_widget(context_paragraph, area);
 }
 
 fn render_paths(f: &mut Frame, area: Rect, state: &GameState) {
@@ -750,6 +1080,7 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
     let positions = state.world.read_storage::<Position>();
     let soldiers = state.world.read_storage::<Soldier>();
     let players = state.world.read_storage::<Player>();
+    let dead_markers = state.world.read_storage::<Dead>();
 
     let top_left = state.camera.top_left();
 
@@ -767,11 +1098,20 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
             let buf_y = area.y + screen_y as u16;
 
             if buf_x < area.right() && buf_y < area.bottom() {
-                let ch = soldier.faction.to_char();
+                // Check if entity is dead
+                let is_dead = dead_markers.contains(entity);
 
-                // Player character is bright green, others use faction colors
-                let color = if players.contains(entity) {
-                    Color::LightGreen
+                let ch = if is_dead {
+                    'X' // Dead bodies shown as X
+                } else {
+                    soldier.faction.to_char()
+                };
+
+                // Color based on status
+                let color = if is_dead {
+                    Color::DarkGray // Dead entities are dark gray
+                } else if players.contains(entity) {
+                    Color::LightGreen // Player is bright green
                 } else {
                     match soldier.faction {
                         Faction::Allies => Color::Blue,
@@ -805,6 +1145,138 @@ fn render_cursor(f: &mut Frame, area: Rect, state: &GameState) {
             // Render cursor as a highlighted square
             f.buffer_mut()[(buf_x, buf_y)]
                 .set_style(Style::default().bg(Color::Yellow));
+        }
+    }
+}
+
+/// Validation result for targeting
+enum TargetValidation {
+    Valid,          // Enemy in range with LOS
+    NoTarget,       // No entity at cursor
+    Friendly,       // Friendly/self at cursor
+    OutOfRange,     // Target exists but out of weapon range
+    NoLineOfSight,  // Target exists but no LOS
+}
+
+/// Check if the cursor position is a valid target for shooting
+fn validate_target(state: &GameState) -> TargetValidation {
+    use argue_the_toss::game_logic::line_of_sight::calculate_fov;
+    use specs::{Join, WorldExt};
+
+    // Get player info
+    let player_entity = match state.get_player_entity() {
+        Some(e) => e,
+        None => return TargetValidation::NoTarget,
+    };
+
+    let positions = state.world.read_storage::<Position>();
+    let soldiers = state.world.read_storage::<Soldier>();
+    let weapons = state.world.read_storage::<Weapon>();
+    let visions = state.world.read_storage::<Vision>();
+    let entities = state.world.entities();
+
+    // Get player position, weapon, and vision
+    let player_pos = match positions.get(player_entity) {
+        Some(p) => p,
+        None => return TargetValidation::NoTarget,
+    };
+
+    let player_weapon = match weapons.get(player_entity) {
+        Some(w) => w,
+        None => return TargetValidation::NoTarget,
+    };
+
+    let player_faction = match soldiers.get(player_entity) {
+        Some(s) => s.faction,
+        None => return TargetValidation::NoTarget,
+    };
+
+    let player_vision = visions.get(player_entity)
+        .map(|v| v.range)
+        .unwrap_or(10);
+
+    // Check if there's an entity at cursor position
+    let target_at_cursor = (&entities, &positions, &soldiers)
+        .join()
+        .find(|(_, pos, _)| pos.x() == state.cursor_pos.x && pos.y() == state.cursor_pos.y);
+
+    let (target_entity, target_pos, target_soldier) = match target_at_cursor {
+        Some((e, p, s)) => (e, p, s),
+        None => return TargetValidation::NoTarget,
+    };
+
+    // Don't allow shooting self or friendlies
+    if target_entity == player_entity || target_soldier.faction == player_faction {
+        return TargetValidation::Friendly;
+    }
+
+    // Calculate distance
+    let dx = (player_pos.x() - target_pos.x()) as f32;
+    let dy = (player_pos.y() - target_pos.y()) as f32;
+    let distance = (dx * dx + dy * dy).sqrt().ceil() as i32;
+
+    // Check range
+    if distance > player_weapon.stats.max_range {
+        return TargetValidation::OutOfRange;
+    }
+
+    // Check line of sight using FOV calculation
+    let player_battlefield_pos = BattlefieldPos::new(player_pos.x(), player_pos.y());
+    let visible_tiles = calculate_fov(&player_battlefield_pos, player_vision, &state.battlefield);
+    let target_battlefield_pos = BattlefieldPos::new(target_pos.x(), target_pos.y());
+
+    if !visible_tiles.contains(&target_battlefield_pos) {
+        return TargetValidation::NoLineOfSight;
+    }
+
+    TargetValidation::Valid
+}
+
+fn render_targeting_cursor(f: &mut Frame, area: Rect, state: &GameState) {
+    let top_left = state.camera.top_left();
+    let screen_x = state.cursor_pos.x - top_left.x;
+    let screen_y = state.cursor_pos.y - top_left.y;
+
+    // Only render if within viewport
+    if screen_x >= 0
+        && screen_x < area.width as i32
+        && screen_y >= 0
+        && screen_y < area.height as i32
+    {
+        let buf_x = area.x + screen_x as u16;
+        let buf_y = area.y + screen_y as u16;
+
+        if buf_x < area.right() && buf_y < area.bottom() {
+            // Validate the target and choose style accordingly
+            let validation = validate_target(state);
+
+            let (cursor_char, cursor_style) = match validation {
+                TargetValidation::Valid => {
+                    // Valid target: bright red background with crosshair
+                    ('X', Style::default().fg(Color::White).bg(Color::Red))
+                }
+                TargetValidation::NoTarget => {
+                    // No target: dim red background
+                    ('+', Style::default().fg(Color::White).bg(Color::DarkGray))
+                }
+                TargetValidation::Friendly => {
+                    // Friendly: yellow/amber warning
+                    ('!', Style::default().fg(Color::Black).bg(Color::Yellow))
+                }
+                TargetValidation::OutOfRange => {
+                    // Out of range: orange/amber
+                    ('?', Style::default().fg(Color::White).bg(Color::Rgb(255, 140, 0)))
+                }
+                TargetValidation::NoLineOfSight => {
+                    // No LOS: magenta/purple
+                    ('/', Style::default().fg(Color::White).bg(Color::Magenta))
+                }
+            };
+
+            // Set both character and style for clear visual feedback
+            f.buffer_mut()[(buf_x, buf_y)]
+                .set_char(cursor_char)
+                .set_style(cursor_style);
         }
     }
 }
