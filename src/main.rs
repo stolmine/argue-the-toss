@@ -7,6 +7,7 @@ use argue_the_toss::{
         dead::Dead,
         facing::{Direction8, Facing},
         health::Health,
+        last_seen::LastSeenMarker,
         pathfinding::PlannedPath,
         player::Player,
         position::Position,
@@ -19,6 +20,7 @@ use argue_the_toss::{
     game_logic::{
         battlefield::{Battlefield, Position as BattlefieldPos, TerrainType},
         pathfinding::calculate_path,
+        shared_vision::calculate_faction_vision,
         turn_state::TurnState,
     },
     rendering::{viewport::Camera, widgets::BattlefieldWidget},
@@ -44,7 +46,8 @@ use ratatui::{
 use specs::{Builder, DispatcherBuilder, Join, World, WorldExt};
 use std::io;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use specs::Entity;
 
 /// Main game state
 struct GameState {
@@ -56,6 +59,9 @@ struct GameState {
     cursor_pos: BattlefieldPos, // For Look mode
     config: GameConfig,
     peripheral_tiles: HashMap<BattlefieldPos, bool>, // Track which tiles are peripheral vision
+    spotter_map: HashMap<BattlefieldPos, Entity>, // Track which entity spotted each tile
+    last_seen_markers: HashMap<Entity, LastSeenMarker>, // Track last-seen markers by tracked entity
+    visible_entities: HashSet<Entity>, // Entities that were visible last turn
 }
 
 impl GameState {
@@ -75,6 +81,7 @@ impl GameState {
         world.register::<Health>();
         world.register::<Dead>();
         world.register::<Facing>();
+        world.register::<LastSeenMarker>();
 
         // Create game config
         let config = GameConfig::default();
@@ -216,6 +223,9 @@ impl GameState {
             cursor_pos: player_start_pos,
             config,
             peripheral_tiles: HashMap::new(),
+            spotter_map: HashMap::new(),
+            last_seen_markers: HashMap::new(),
+            visible_entities: HashSet::new(),
         }
     }
 
@@ -778,44 +788,123 @@ impl GameState {
     }
 
     fn update_visibility(&mut self) {
-        use argue_the_toss::game_logic::vision_cone::calculate_vision_cone;
         use specs::Join;
 
         // Reset all visibility flags
         self.battlefield.reset_visibility();
         self.peripheral_tiles.clear();
+        self.spotter_map.clear();
 
-        // Calculate vision cone for player
-        if let Some(player_pos) = self.get_player_position() {
-            // Get player's vision range and facing
-            let (vision_range, facing) = {
-                let players = self.world.read_storage::<Player>();
-                let visions = self.world.read_storage::<Vision>();
-                let facings = self.world.read_storage::<Facing>();
-                let entities = self.world.entities();
+        // Get current turn number
+        let current_turn = {
+            let turn_state = self.world.read_resource::<TurnState>();
+            turn_state.current_turn
+        };
 
-                (&entities, &players, &visions, &facings)
-                    .join()
-                    .next()
-                    .map(|(_, _, vision, facing)| (vision.range, facing.direction))
-                    .unwrap_or((10, Direction8::N)) // Default if components missing
-            };
+        // Calculate shared vision for Allies faction (player + friendly units)
+        let shared_vision = {
+            let entities = self.world.entities();
+            let positions = self.world.read_storage::<Position>();
+            let visions = self.world.read_storage::<Vision>();
+            let facings = self.world.read_storage::<Facing>();
+            let soldiers = self.world.read_storage::<Soldier>();
 
-            // Calculate vision cone (main + peripheral)
-            let (main_vision, peripheral_vision) =
-                calculate_vision_cone(&player_pos, facing, vision_range, &self.battlefield);
+            calculate_faction_vision(
+                &entities,
+                &positions,
+                &visions,
+                &facings,
+                &soldiers,
+                Faction::Allies,
+                &self.battlefield,
+            )
+        };
 
-            // Mark main vision tiles as visible
-            for pos in main_vision {
-                self.battlefield.set_visible(pos, true);
-            }
+        // Mark main vision tiles as visible
+        for pos in &shared_vision.visible_tiles {
+            self.battlefield.set_visible(*pos.as_battlefield_pos(), true);
+        }
 
-            // Mark peripheral vision tiles as visible (and track them for dimming)
-            for pos in peripheral_vision {
-                self.battlefield.set_visible(pos, true);
-                self.peripheral_tiles.insert(pos, true);
+        // Mark peripheral vision tiles as visible (and track them for dimming)
+        for pos in &shared_vision.peripheral_tiles {
+            self.battlefield.set_visible(*pos.as_battlefield_pos(), true);
+            self.peripheral_tiles.insert(*pos.as_battlefield_pos(), true);
+        }
+
+        // Store spotter map (converting to BattlefieldPosition keys)
+        self.spotter_map.clear();
+        for (pos, entity) in shared_vision.spotter_map {
+            self.spotter_map.insert(*pos.as_battlefield_pos(), entity);
+        }
+
+        // Track which entities are currently visible
+        let mut currently_visible = HashSet::new();
+        {
+            let entities = self.world.entities();
+            let positions = self.world.read_storage::<Position>();
+            let soldiers = self.world.read_storage::<Soldier>();
+            let dead_markers = self.world.read_storage::<Dead>();
+
+            for (entity, pos, soldier) in (&entities, &positions, &soldiers).join() {
+                // Skip dead entities
+                if dead_markers.contains(entity) {
+                    continue;
+                }
+
+                // Skip friendly entities (we only track enemies)
+                if soldier.faction == Faction::Allies {
+                    continue;
+                }
+
+                // Check if this position is visible
+                if shared_vision.visible_tiles.contains(&pos)
+                    || shared_vision.peripheral_tiles.contains(&pos)
+                {
+                    currently_visible.insert(entity);
+
+                    // Remove last-seen marker if entity is now visible
+                    self.last_seen_markers.remove(&entity);
+                }
             }
         }
+
+        // Create last-seen markers for entities that became invisible
+        {
+            let positions = self.world.read_storage::<Position>();
+            let soldiers = self.world.read_storage::<Soldier>();
+
+            for entity in &self.visible_entities {
+                // If entity was visible but isn't anymore
+                if !currently_visible.contains(entity) {
+                    // Check if entity still exists
+                    if let (Some(pos), Some(soldier)) =
+                        (positions.get(*entity), soldiers.get(*entity))
+                    {
+                        // Create or update last-seen marker
+                        self.last_seen_markers.insert(
+                            *entity,
+                            LastSeenMarker::new(
+                                pos.clone(),
+                                soldier.faction,
+                                soldier.rank,
+                                current_turn,
+                                *entity,
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Update turn counter for existing markers and remove expired ones
+        let max_turns = 10; // Markers expire after 10 turns
+        self.last_seen_markers.retain(|_, marker| {
+            marker.update_turn(current_turn);
+            !marker.should_expire(max_turns)
+        });
+
+        // Update visible entities set for next turn
+        self.visible_entities = currently_visible;
     }
 }
 
@@ -862,6 +951,9 @@ fn ui(f: &mut Frame, state: &GameState) {
 
     // Render planned paths (before soldiers so they appear underneath)
     render_paths(f, inner_area, state);
+
+    // Render last-seen markers (before soldiers, so they appear underneath)
+    render_last_seen_markers(f, inner_area, state);
 
     // Render soldiers on top
     render_soldiers(f, inner_area, state);
@@ -1117,6 +1209,45 @@ fn render_context_info(f: &mut Frame, area: Rect, state: &GameState) {
         }
     } else {
         context_lines.push(Line::from("No entity here"));
+
+        // Check for last-seen marker at this position
+        let marker_at_pos = state.last_seen_markers.values().find(|marker| {
+            marker.position.x() == inspect_pos.x && marker.position.y() == inspect_pos.y
+        });
+
+        if let Some(marker) = marker_at_pos {
+            context_lines.push(Line::from(""));
+            context_lines.push(Line::from("--- Last Seen ---"));
+            context_lines.push(Line::from(format!(
+                "Enemy last seen: {} turns ago",
+                marker.turns_ago
+            )));
+            context_lines.push(Line::from(format!(
+                "Faction: {:?}",
+                marker.faction
+            )));
+            context_lines.push(Line::from(format!(
+                "Rank: {}",
+                marker.rank.as_str()
+            )));
+        }
+    }
+
+    // Show spotter information if tile is visible
+    if let Some(spotter_entity) = state.spotter_map.get(&inspect_pos) {
+        let soldiers = state.world.read_storage::<Soldier>();
+        let players = state.world.read_storage::<Player>();
+
+        if let Some(soldier) = soldiers.get(*spotter_entity) {
+            let spotter_name = if players.contains(*spotter_entity) {
+                "You"
+            } else {
+                &soldier.name
+            };
+
+            context_lines.push(Line::from(""));
+            context_lines.push(Line::from(format!("Spotted by: {}", spotter_name)));
+        }
     }
 
     // In Targeting mode, show additional targeting info
@@ -1238,6 +1369,38 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
                         Faction::CentralPowers => Color::Red,
                     }
                 };
+
+                f.buffer_mut()[(buf_x, buf_y)]
+                    .set_char(ch)
+                    .set_style(Style::default().fg(color));
+            }
+        }
+    }
+}
+
+fn render_last_seen_markers(f: &mut Frame, area: Rect, state: &GameState) {
+    let top_left = state.camera.top_left();
+
+    // Render ghost markers for last-seen enemy positions
+    for marker in state.last_seen_markers.values() {
+        let screen_x = marker.position.x() - top_left.x;
+        let screen_y = marker.position.y() - top_left.y;
+
+        // Only render if within viewport
+        if screen_x >= 0
+            && screen_x < area.width as i32
+            && screen_y >= 0
+            && screen_y < area.height as i32
+        {
+            let buf_x = area.x + screen_x as u16;
+            let buf_y = area.y + screen_y as u16;
+
+            if buf_x < area.right() && buf_y < area.bottom() {
+                // Use faction character but dimmed/ghostly
+                let ch = marker.faction.to_char();
+
+                // Dark gray color for ghost markers (old intel)
+                let color = Color::DarkGray;
 
                 f.buffer_mut()[(buf_x, buf_y)]
                     .set_char(ch)

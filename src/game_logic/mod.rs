@@ -5,6 +5,7 @@ pub mod battlefield;
 pub mod combat;
 pub mod line_of_sight;
 pub mod pathfinding;
+pub mod shared_vision;
 pub mod turn_state;
 pub mod vision_cone;
 

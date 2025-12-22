@@ -5,6 +5,7 @@ pub mod action;
 pub mod dead;
 pub mod facing;
 pub mod health;
+pub mod last_seen;
 pub mod pathfinding;
 pub mod player;
 pub mod position;

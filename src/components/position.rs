@@ -4,7 +4,7 @@ use crate::game_logic::battlefield::Position as BattlefieldPosition;
 use specs::{Component, VecStorage};
 
 /// Component that represents an entity's position on the battlefield
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Position(pub BattlefieldPosition);
 
 impl Component for Position {
