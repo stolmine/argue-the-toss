@@ -5,6 +5,7 @@ use argue_the_toss::{
     components::{
         action::{OngoingAction, QueuedAction},
         dead::Dead,
+        facing::{Direction8, Facing},
         health::Health,
         pathfinding::PlannedPath,
         player::Player,
@@ -43,6 +44,8 @@ use ratatui::{
 use specs::{Builder, DispatcherBuilder, Join, World, WorldExt};
 use std::io;
 
+use std::collections::HashMap;
+
 /// Main game state
 struct GameState {
     world: World,
@@ -52,6 +55,7 @@ struct GameState {
     input_mode: InputMode,
     cursor_pos: BattlefieldPos, // For Look mode
     config: GameConfig,
+    peripheral_tiles: HashMap<BattlefieldPos, bool>, // Track which tiles are peripheral vision
 }
 
 impl GameState {
@@ -70,6 +74,7 @@ impl GameState {
         world.register::<Weapon>();
         world.register::<Health>();
         world.register::<Dead>();
+        world.register::<Facing>();
 
         // Create game config
         let config = GameConfig::default();
@@ -151,6 +156,7 @@ impl GameState {
             .with(Vision::new(10))
             .with(Weapon::rifle())
             .with(Health::soldier())
+            .with(Facing::new(Direction8::N))
             .build();
 
         // Allied NPC
@@ -166,6 +172,7 @@ impl GameState {
             .with(Vision::new(10))
             .with(Weapon::rifle())
             .with(Health::soldier())
+            .with(Facing::new(Direction8::W))
             .build();
 
         // Enemy NPC 1
@@ -181,6 +188,7 @@ impl GameState {
             .with(Vision::new(10))
             .with(Weapon::rifle())
             .with(Health::soldier())
+            .with(Facing::new(Direction8::E))
             .build();
 
         // Enemy NPC 2 (for testing)
@@ -196,6 +204,7 @@ impl GameState {
             .with(Vision::new(10))
             .with(Weapon::rifle())
             .with(Health::soldier())
+            .with(Facing::new(Direction8::E))
             .build();
 
         Self {
@@ -206,6 +215,7 @@ impl GameState {
             input_mode: InputMode::default(),
             cursor_pos: player_start_pos,
             config,
+            peripheral_tiles: HashMap::new(),
         }
     }
 
@@ -231,9 +241,19 @@ impl GameState {
     }
 
     fn handle_command_mode(&mut self, key: KeyEvent) {
+        use crossterm::event::KeyModifiers;
+
         match key.code {
-            KeyCode::Char('q') => self.running = false,
-            KeyCode::Char('x') => {
+            // Quit
+            KeyCode::Char('Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.running = false
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.running = false
+            }
+
+            // Look mode
+            KeyCode::Char('l') => {
                 // Enter Look mode
                 self.input_mode = InputMode::Look;
                 // Set cursor to player position
@@ -241,7 +261,9 @@ impl GameState {
                     self.cursor_pos = player_pos;
                 }
             }
-            KeyCode::Char('c') => {
+
+            // Center camera
+            KeyCode::Char('v') => {
                 // Center camera on player
                 if let Some(player_pos) = self.get_player_position() {
                     self.camera.center_on(player_pos);
@@ -249,10 +271,13 @@ impl GameState {
                         .constrain(self.battlefield.width(), self.battlefield.height());
                 }
             }
+
+            // Advance turn
             KeyCode::Char(' ') => {
-                // Space: Advance turn (PathExecutionSystem will handle path step execution)
                 self.advance_turn();
             }
+
+            // Fire
             KeyCode::Char('f') => {
                 // Enter targeting mode for shooting
                 self.input_mode = InputMode::Targeting;
@@ -261,15 +286,31 @@ impl GameState {
                     self.cursor_pos = player_pos;
                 }
             }
+
+            // Reload
             KeyCode::Char('r') => {
-                // Reload weapon
                 self.player_reload();
             }
-            // Movement keys - commit movement actions
-            KeyCode::Up | KeyCode::Char('k') => self.commit_player_action(0, -1),
-            KeyCode::Down | KeyCode::Char('j') => self.commit_player_action(0, 1),
-            KeyCode::Left | KeyCode::Char('h') => self.commit_player_action(-1, 0),
-            KeyCode::Right | KeyCode::Char('l') => self.commit_player_action(1, 0),
+
+            // Rotation
+            KeyCode::Char(',') => {
+                self.player_rotate(false); // Counter-clockwise
+            }
+            KeyCode::Char('.') => {
+                self.player_rotate(true); // Clockwise
+            }
+
+            // Movement keys - qweasdzxc layout
+            KeyCode::Char('q') => self.commit_player_action(-1, -1), // NW
+            KeyCode::Char('w') => self.commit_player_action(0, -1),  // N
+            KeyCode::Char('e') => self.commit_player_action(1, -1),  // NE
+            KeyCode::Char('a') => self.commit_player_action(-1, 0),  // W
+            KeyCode::Char('s') => self.commit_player_wait(),         // Wait
+            KeyCode::Char('d') => self.commit_player_action(1, 0),   // E
+            KeyCode::Char('z') => self.commit_player_action(-1, 1),  // SW
+            KeyCode::Char('x') => self.commit_player_action(0, 1),   // S
+            KeyCode::Char('c') => self.commit_player_action(1, 1),   // SE
+
             _ => {}
         }
     }
@@ -456,6 +497,55 @@ impl GameState {
         }
     }
 
+    fn player_rotate(&mut self, clockwise: bool) {
+        use argue_the_toss::components::action::{ActionType, QueuedAction};
+        use specs::WorldExt;
+
+        if let Some(player_entity) = self.get_player_entity() {
+            // Safety check: Don't allow dead player to act
+            {
+                let deads = self.world.read_storage::<Dead>();
+                if deads.get(player_entity).is_some() {
+                    self.world.write_resource::<EventLog>()
+                        .add("You are dead!".to_string());
+                    return;
+                }
+            }
+
+            let action = QueuedAction::new(ActionType::Rotate { clockwise });
+            let mut actions = self.world.write_storage::<QueuedAction>();
+            actions.insert(player_entity, action).ok();
+
+            let direction = if clockwise { "clockwise" } else { "counter-clockwise" };
+            let mut log = self.world.write_resource::<EventLog>();
+            log.add(format!("Rotating {}.", direction));
+        }
+    }
+
+    fn commit_player_wait(&mut self) {
+        use argue_the_toss::components::action::{ActionType, QueuedAction};
+        use specs::WorldExt;
+
+        if let Some(player_entity) = self.get_player_entity() {
+            // Safety check: Don't allow dead player to act
+            {
+                let deads = self.world.read_storage::<Dead>();
+                if deads.get(player_entity).is_some() {
+                    self.world.write_resource::<EventLog>()
+                        .add("You are dead!".to_string());
+                    return;
+                }
+            }
+
+            let action = QueuedAction::new(ActionType::Wait);
+            let mut actions = self.world.write_storage::<QueuedAction>();
+            actions.insert(player_entity, action).ok();
+
+            let mut log = self.world.write_resource::<EventLog>();
+            log.add("Waiting...".to_string());
+        }
+    }
+
     fn advance_turn(&mut self) {
         use argue_the_toss::game_logic::turn_state::TurnState;
         use specs::WorldExt;
@@ -498,6 +588,16 @@ impl GameState {
             None => return,
         };
 
+        // Safety check: Don't allow dead player to act
+        {
+            let deads = self.world.read_storage::<Dead>();
+            if deads.get(player_entity).is_some() {
+                self.world.write_resource::<EventLog>()
+                    .add("You are dead!".to_string());
+                return;
+            }
+        }
+
         // Clear any existing planned path when manually moving
         {
             let mut paths = self.world.write_storage::<PlannedPath>();
@@ -532,6 +632,14 @@ impl GameState {
             .get_tile(&new_pos)
             .map(|t| t.terrain.movement_cost())
             .unwrap_or(1.0);
+
+        // Auto-facing: Update facing direction based on movement
+        {
+            let mut facings = self.world.write_storage::<Facing>();
+            if let Some(facing) = facings.get_mut(player_entity) {
+                facing.update_from_movement(dx, dy);
+            }
+        }
 
         // Create movement action
         let action_type = ActionType::Move {
@@ -670,33 +778,42 @@ impl GameState {
     }
 
     fn update_visibility(&mut self) {
-        use argue_the_toss::game_logic::line_of_sight::calculate_fov;
+        use argue_the_toss::game_logic::vision_cone::calculate_vision_cone;
         use specs::Join;
 
         // Reset all visibility flags
         self.battlefield.reset_visibility();
+        self.peripheral_tiles.clear();
 
-        // Calculate FOV for player
+        // Calculate vision cone for player
         if let Some(player_pos) = self.get_player_position() {
-            // Get player's vision range
-            let vision_range = {
+            // Get player's vision range and facing
+            let (vision_range, facing) = {
                 let players = self.world.read_storage::<Player>();
                 let visions = self.world.read_storage::<Vision>();
+                let facings = self.world.read_storage::<Facing>();
                 let entities = self.world.entities();
 
-                (&entities, &players, &visions)
+                (&entities, &players, &visions, &facings)
                     .join()
                     .next()
-                    .map(|(_, _, vision)| vision.range)
-                    .unwrap_or(10) // Default 10 if no vision component
+                    .map(|(_, _, vision, facing)| (vision.range, facing.direction))
+                    .unwrap_or((10, Direction8::N)) // Default if components missing
             };
 
-            // Calculate visible tiles
-            let visible_tiles = calculate_fov(&player_pos, vision_range, &self.battlefield);
+            // Calculate vision cone (main + peripheral)
+            let (main_vision, peripheral_vision) =
+                calculate_vision_cone(&player_pos, facing, vision_range, &self.battlefield);
 
-            // Mark all visible tiles
-            for pos in visible_tiles {
+            // Mark main vision tiles as visible
+            for pos in main_vision {
                 self.battlefield.set_visible(pos, true);
+            }
+
+            // Mark peripheral vision tiles as visible (and track them for dimming)
+            for pos in peripheral_vision {
+                self.battlefield.set_visible(pos, true);
+                self.peripheral_tiles.insert(pos, true);
             }
         }
     }
@@ -739,7 +856,8 @@ fn ui(f: &mut Frame, state: &GameState) {
     let inner_area = battlefield_block.inner(top_chunks[0]);
     f.render_widget(battlefield_block, top_chunks[0]);
 
-    let battlefield_widget = BattlefieldWidget::new(&state.battlefield, &state.camera);
+    let battlefield_widget = BattlefieldWidget::new(&state.battlefield, &state.camera)
+        .with_peripheral_tiles(&state.peripheral_tiles);
     f.render_widget(battlefield_widget, inner_area);
 
     // Render planned paths (before soldiers so they appear underneath)
@@ -1103,8 +1221,10 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
 
                 let ch = if is_dead {
                     'X' // Dead bodies shown as X
+                } else if players.contains(entity) {
+                    '@' // Player character
                 } else {
-                    soldier.faction.to_char()
+                    soldier.faction.to_char() // Faction symbol
                 };
 
                 // Color based on status

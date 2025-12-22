@@ -4,6 +4,7 @@
 use crate::components::{
     action::{ActionType, OngoingAction, QueuedAction},
     dead::Dead,
+    facing::Facing,
     health::Health,
     position::Position,
     soldier::Soldier,
@@ -23,6 +24,7 @@ impl<'a> System<'a> for ActionExecutionSystem {
         Entities<'a>,
         ReadStorage<'a, QueuedAction>,
         WriteStorage<'a, Position>,
+        WriteStorage<'a, Facing>,
         WriteStorage<'a, OngoingAction>,
         WriteStorage<'a, Weapon>,
         WriteStorage<'a, Health>,
@@ -40,6 +42,7 @@ impl<'a> System<'a> for ActionExecutionSystem {
             entities,
             queued,
             mut positions,
+            mut facings,
             mut _ongoing,
             mut weapons,
             mut healths,
@@ -62,6 +65,11 @@ impl<'a> System<'a> for ActionExecutionSystem {
                 continue;
             }
 
+            // Skip if entity is dead
+            if dead_markers.get(entity).is_some() {
+                continue;
+            }
+
             match &action.action_type {
                 ActionType::Move {
                     dx,
@@ -75,6 +83,21 @@ impl<'a> System<'a> for ActionExecutionSystem {
                         if new_x >= 0 && new_x < 100 && new_y >= 0 && new_y < 100 {
                             *pos = Position::new(new_x, new_y);
                             log.add(format!("Entity moved to ({}, {})", new_x, new_y));
+                        }
+                    }
+                }
+                ActionType::Rotate { clockwise } => {
+                    // Execute rotation
+                    if let Some(facing) = facings.get_mut(entity) {
+                        if *clockwise {
+                            facing.rotate_cw();
+                        } else {
+                            facing.rotate_ccw();
+                        }
+
+                        if let Some(soldier) = soldiers.get(entity) {
+                            log.add(format!("{} rotates {}.", soldier.name,
+                                if *clockwise { "clockwise" } else { "counter-clockwise" }));
                         }
                     }
                 }

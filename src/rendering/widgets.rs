@@ -8,12 +8,14 @@ use ratatui::{
     style::{Color, Style},
     widgets::Widget,
 };
+use std::collections::HashMap;
 
 /// Widget that renders the battlefield viewport
 pub struct BattlefieldWidget<'a> {
     battlefield: &'a Battlefield,
     camera: &'a Camera,
     show_fog_of_war: bool,
+    peripheral_tiles: Option<&'a HashMap<Position, bool>>,
 }
 
 impl<'a> BattlefieldWidget<'a> {
@@ -22,11 +24,17 @@ impl<'a> BattlefieldWidget<'a> {
             battlefield,
             camera,
             show_fog_of_war: true,
+            peripheral_tiles: None,
         }
     }
 
     pub fn show_fog_of_war(mut self, show: bool) -> Self {
         self.show_fog_of_war = show;
+        self
+    }
+
+    pub fn with_peripheral_tiles(mut self, peripheral: &'a HashMap<Position, bool>) -> Self {
+        self.peripheral_tiles = Some(peripheral);
         self
     }
 }
@@ -47,10 +55,21 @@ impl<'a> Widget for BattlefieldWidget<'a> {
                 if let Some(tile) = self.battlefield.get_tile(&world_pos) {
                     let (ch, style) = if self.show_fog_of_war {
                         if tile.visible {
-                            // Fully visible
-                            (tile.terrain.to_char(), Style::default().fg(Color::White))
+                            // Check if this is peripheral vision (dimmed)
+                            let is_peripheral = self.peripheral_tiles
+                                .and_then(|map| map.get(&world_pos))
+                                .copied()
+                                .unwrap_or(false);
+
+                            if is_peripheral {
+                                // Peripheral vision: dimmed (50% brightness via gray color)
+                                (tile.terrain.to_char(), Style::default().fg(Color::Gray))
+                            } else {
+                                // Main vision: full brightness
+                                (tile.terrain.to_char(), Style::default().fg(Color::White))
+                            }
                         } else if tile.explored {
-                            // Explored but not currently visible (gray)
+                            // Explored but not currently visible (dark gray)
                             (tile.terrain.to_char(), Style::default().fg(Color::DarkGray))
                         } else {
                             // Unexplored (black/hidden)

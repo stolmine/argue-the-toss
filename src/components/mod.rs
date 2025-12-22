@@ -3,6 +3,7 @@
 
 pub mod action;
 pub mod dead;
+pub mod facing;
 pub mod health;
 pub mod pathfinding;
 pub mod player;

@@ -12,3 +12,4 @@
     - ECS patterns and performance guidelines
 
     - stay DRY as much as possible
+    - do not say 'you're absolutely right', avoid flattery

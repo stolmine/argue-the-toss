@@ -74,15 +74,16 @@
 - [x] AI pathfinding (NPCs move toward player using pathfinding)
 - [x] Manual movement override (hjkl cancels planned paths)
 - [x] Automatic path execution (Space key advances turn and executes planned path steps)
+- [x] Basic combat (hitscan weapons)
+- [x] Ammunition mechanic (reloading, running out of ammo)
+- [x] 8-direction movement system (qweasdzxc keyboard layout)
+- [x] Player vision cone system (CDCA-style directional FOV)
+- [x] Terrain dimming outside vision cone (peripheral vision)
 
 #### In Progress Tasks
-- [ ] Basic combat (hitscan weapons)
-- [ ] Ammunition mechanic (reloading, running out of ammo)
 - [ ] Action/event subdivision for animation support (sub-turn phases)
 - [ ] Targeting system completion (object pickup, enemy selection actions)
 - [ ] Visual indication of entity actions (movement trails, firing indicators, grenade throws)
-- [ ] Player vision cone system (CDCA-style directional FOV)
-- [ ] Terrain dimming outside vision cone
 - [ ] Last-seen entity markers (static ghosts of last known positions)
 - [ ] FOW mode options (no FOW, friendly vision, player-only vision)
 
@@ -102,13 +103,30 @@
 - Space key turn advancement: Triggers PathExecutionSystem to execute next path step
 - Time budget integration: PathExecutionSystem properly consumes time when creating actions
 
+#### Implementation Details - Vision Cone System
+- Created `facing.rs` component with Direction8 enum (N, NE, E, SE, S, SW, W, NW)
+- Created `vision_cone.rs` with directional FOV calculation
+- Implemented 8-direction movement with qweasdzxc keyboard layout
+- 120° main vision cone (±60° from facing direction)
+- 60° peripheral vision on each side (dimmed to 50% brightness)
+- 180° rear blind spot (explored tiles only)
+- Auto-facing on movement (facing updates to match movement direction)
+- Manual rotation with , (CCW) and . (CW) keys (0.3s cost)
+- Time scale adjustments for trench warfare feel (~2m per tile):
+  - Movement: 1.5s per tile (was 2.0s)
+  - Rotation: 0.3s per 45° (was 0.5s)
+  - Turn budget: 12s default (was 10s)
+- Vision cone respects LOS and terrain blocking
+- Peripheral vision rendered with dimmed colors (gray tint)
+- Dead entities cannot move or take actions (bug fix)
+
 #### Success Criteria
 - ✓ Viewport adapts to terminal size
 - ✓ Modal UI with Command and Look modes
 - ✓ Basic player movement with camera following
 - ✓ Targeting cursor foundation (free cursor in Look mode)
-- ✓ Time budget system limits actions (10 sec/turn budget, configurable 5-30s)
-- ✓ Actions have time costs (move: 2s × terrain, shoot: 3s, reload: 5s, etc.)
+- ✓ Time budget system limits actions (12 sec/turn budget default, configurable)
+- ✓ Actions have time costs (move: 1.5s × terrain, shoot: 3s, reload: 5s, rotate: 0.3s)
 - ✓ Multi-turn actions tracked correctly (partial completion, locked-in state)
 - ✓ Over-budget actions handle gracefully (time debt carries to next turn)
 - ✓ Turn timescale defined (seconds per turn) and consistent
@@ -124,14 +142,17 @@
 - ✓ AI uses pathfinding to move toward player
 - ✓ Manual movement (hjkl) overrides planned paths
 - ✓ Automatic path execution (Space advances turn, path step executes automatically)
-- Combat resolves with line-of-sight checks
-- Weapons require reloading and can run out of ammunition
+- ✓ Combat resolves with line-of-sight checks
+- ✓ Weapons require reloading and can run out of ammunition
+- ✓ 8-direction movement system (qweasdzxc layout)
+- ✓ Vision cone emanates from player with directional awareness (120° main, 60° peripheral)
+- ✓ Terrain outside vision cone is dimmed (peripheral vision at 50% brightness)
+- ✓ Manual facing control (rotation keys for tactical positioning)
+- ✓ Dead entities cannot move or act
 - Actions subdivided into phases for smooth animation
 - Committed actions shown with progress indicators
 - Targeting cursor allows object/enemy selection actions
 - Prior turn actions are visually indicated (who moved, fired, threw grenades)
-- Vision cone emanates from player with directional awareness
-- Terrain outside vision is dimmed/obscured
 - Last-seen enemy positions marked with static indicators
 - Multiple FOW modes available (configurable)
 

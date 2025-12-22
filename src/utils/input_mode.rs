@@ -4,7 +4,9 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     /// Command mode: direct character control
-    /// - hjkl/arrows move the player character
+    /// - qweasdzxc move the player in 8 directions
+    /// - s waits in place
+    /// - ,/. rotate facing CCW/CW
     /// - Other keys trigger actions
     /// - Camera follows player
     Command,
@@ -35,7 +37,7 @@ impl InputMode {
 
     pub fn help_text(&self) -> &'static str {
         match self {
-            InputMode::Command => "hjkl/arrows: move | Space: advance turn | f: fire | r: reload | x: look | c: center | q: quit",
+            InputMode::Command => "qweasdzxc: 8-dir move | s: wait | ,/.: rotate | Space: advance | f: fire | r: reload | l: look | v: center | Shift+Q/Ctrl+C: quit",
             InputMode::Look => "hjkl/arrows: pan camera | c: center | Enter: select destination | ESC: exit",
             InputMode::Targeting => "hjkl/arrows: pan camera | c: center | Enter: shoot target | ESC: cancel",
         }

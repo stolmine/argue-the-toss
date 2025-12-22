@@ -6,6 +6,7 @@ pub mod combat;
 pub mod line_of_sight;
 pub mod pathfinding;
 pub mod turn_state;
+pub mod vision_cone;
 
 // Future game logic submodules:
 // pub mod fog_of_war;

@@ -7,6 +7,8 @@ use specs::{Component, Entity, VecStorage};
 pub enum ActionType {
     /// Move in a direction with terrain cost multiplier
     Move { dx: i32, dy: i32, terrain_cost: f32 },
+    /// Rotate facing direction (true = clockwise, false = counter-clockwise)
+    Rotate { clockwise: bool },
     /// Shoot at a target entity
     Shoot { target: Entity },
     /// Reload weapon
@@ -19,9 +21,11 @@ pub enum ActionType {
 
 impl ActionType {
     /// Get the base time cost for this action type (in seconds)
+    /// Note: Movement and rotation costs should be read from GameConfig in the future
     pub fn base_time_cost(&self) -> f32 {
         match self {
-            ActionType::Move { terrain_cost, .. } => 2.0 * terrain_cost,
+            ActionType::Move { terrain_cost, .. } => 1.5 * terrain_cost, // Updated: 2.0 -> 1.5
+            ActionType::Rotate { .. } => 0.3, // New: Rotation cost
             ActionType::Shoot { .. } => 3.0,
             ActionType::Reload => 5.0,
             ActionType::ThrowGrenade { .. } => 4.0,

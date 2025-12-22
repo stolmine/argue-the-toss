@@ -3,6 +3,7 @@
 
 use crate::components::{
     action::{ActionType, QueuedAction},
+    dead::Dead,
     pathfinding::PlannedPath,
     position::Position,
     time_budget::TimeBudget,
@@ -17,6 +18,7 @@ impl<'a> System<'a> for PathExecutionSystem {
     type SystemData = (
         Entities<'a>,
         ReadStorage<'a, Position>,
+        ReadStorage<'a, Dead>,
         WriteStorage<'a, PlannedPath>,
         WriteStorage<'a, QueuedAction>,
         WriteStorage<'a, TimeBudget>,
@@ -27,7 +29,7 @@ impl<'a> System<'a> for PathExecutionSystem {
 
     fn run(
         &mut self,
-        (entities, positions, mut paths, mut queued, mut budgets, battlefield, turn_state, mut _log): Self::SystemData,
+        (entities, positions, deads, mut paths, mut queued, mut budgets, battlefield, turn_state, mut _log): Self::SystemData,
     ) {
         // Only execute during Planning phase (before actions are executed)
         if !matches!(turn_state.phase, TurnPhase::Planning) {
@@ -38,6 +40,11 @@ impl<'a> System<'a> for PathExecutionSystem {
         let mut paths_to_remove = Vec::new();
 
         for (entity, pos, path) in (&entities, &positions, &mut paths).join() {
+            // Skip if entity is dead
+            if deads.get(entity).is_some() {
+                continue;
+            }
+
             // Skip if entity already has a queued action for this turn
             if queued.contains(entity) {
                 continue;
