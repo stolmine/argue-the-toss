@@ -1,6 +1,6 @@
 # Argue the Toss - Development Roadmap
 
-## Project Status: Phase 2 In Progress
+## Project Status: Phase 2 - 95% Complete
 
 ### Current Phase: Phase 0 - Project Setup
 **Status:** Completed
@@ -50,7 +50,7 @@
 
 ### Phase 2: Essential Mechanics
 **Target:** Core gameplay loop
-**Status:** In Progress
+**Status:** 95% Complete
 
 #### Completed Tasks
 - [x] Modal UI system (Command mode vs Look/Targeting mode)
@@ -79,46 +79,26 @@
 - [x] 8-direction movement system (qweasdzxc keyboard layout)
 - [x] Player vision cone system (CDCA-style directional FOV)
 - [x] Terrain dimming outside vision cone (peripheral vision)
+- [x] Last-seen entity markers (ghost markers at last known positions)
+- [x] Shared ally vision (players see what allies see)
 
-#### In Progress Tasks
-- [ ] Action/event subdivision for animation support (sub-turn phases)
-- [ ] Targeting system completion (object pickup, enemy selection actions)
-- [ ] Visual indication of entity actions (movement trails, firing indicators, grenade throws)
-- [ ] Last-seen entity markers (static ghosts of last known positions)
-- [ ] FOW mode options (no FOW, friendly vision, player-only vision)
+#### Remaining Tasks
+- [ ] Action/event subdivision for animation support
+- [ ] Visual action indicators (muzzle flashes, movement trails)
+- [ ] FOW mode options (configurable vision modes)
 
-#### Implementation Details - Pathfinding System
-- Created `pathfinding.rs` with A* implementation using bracket-pathfinding
-- Created `PlannedPath` component to store multi-step paths
-- Created `PathExecutionSystem` to convert path steps into Move actions
-- Implemented terrain-aware cost calculation (Trench 1.0x, Mud 2.0x, etc.)
-- Added diagonal movement penalty (1.414x for diagonal steps)
-- Integrated path visualization with numbered step display (1-9, then +)
-- **Critical Bug Fix:** Added `get_pathing_distance()` heuristic implementation
-  - Without proper heuristic, A* degraded to exhaustive search
-  - Caused 245-step paths for 7-tile moves (touring entire map)
-  - Fix: Implemented Euclidean distance heuristic for optimal pathfinding
-- AI integration: NPCs pathfind toward player instead of waiting
-- Manual override: hjkl movement cancels planned paths
-- Space key turn advancement: Triggers PathExecutionSystem to execute next path step
-- Time budget integration: PathExecutionSystem properly consumes time when creating actions
+#### Implementation Details - Core Systems
+- **Pathfinding:** A* with terrain costs, diagonal support, visual path preview (numbered steps)
+- **Turn System:** 12s budget, time-based actions, multi-turn action tracking
+- **UI:** Split-pane layout, event log (wrapping text), context info panel
 
-#### Implementation Details - Vision Cone System
-- Created `facing.rs` component with Direction8 enum (N, NE, E, SE, S, SW, W, NW)
-- Created `vision_cone.rs` with directional FOV calculation
-- Implemented 8-direction movement with qweasdzxc keyboard layout
-- 120° main vision cone (±60° from facing direction)
-- 60° peripheral vision on each side (dimmed to 50% brightness)
-- 180° rear blind spot (explored tiles only)
-- Auto-facing on movement (facing updates to match movement direction)
-- Manual rotation with , (CCW) and . (CW) keys (0.3s cost)
-- Time scale adjustments for trench warfare feel (~2m per tile):
-  - Movement: 1.5s per tile (was 2.0s)
-  - Rotation: 0.3s per 45° (was 0.5s)
-  - Turn budget: 12s default (was 10s)
-- Vision cone respects LOS and terrain blocking
-- Peripheral vision rendered with dimmed colors (gray tint)
-- Dead entities cannot move or take actions (bug fix)
+#### Implementation Details - Vision & Tactical Systems
+- **Vision Cone:** 120° main cone, 60° peripheral (dimmed), 180° blind spot
+- **8-Direction Movement:** qweasdzxc layout with auto-facing
+- **Time Scale:** Tiles = ~2m, movement 1.5s, rotation 0.3s, turn budget 12s
+- **Last-Seen Markers:** Ghost markers at enemy last known positions (10 turn expiry)
+- **Shared Vision:** Players see combined allied FOV with spotter attribution
+- **Combat:** Hitscan weapons, 70% base accuracy, ammo/reload mechanics
 
 #### Success Criteria
 - ✓ Viewport adapts to terminal size
@@ -140,21 +120,20 @@
 - ✓ Path preview shows numbered steps visually
 - ✓ Player can plan paths via Look mode cursor
 - ✓ AI uses pathfinding to move toward player
-- ✓ Manual movement (hjkl) overrides planned paths
-- ✓ Automatic path execution (Space advances turn, path step executes automatically)
-- ✓ Combat resolves with line-of-sight checks
-- ✓ Weapons require reloading and can run out of ammunition
-- ✓ 8-direction movement system (qweasdzxc layout)
-- ✓ Vision cone emanates from player with directional awareness (120° main, 60° peripheral)
-- ✓ Terrain outside vision cone is dimmed (peripheral vision at 50% brightness)
-- ✓ Manual facing control (rotation keys for tactical positioning)
+- ✓ Manual movement overrides planned paths
+- ✓ Automatic path execution (Space advances turn)
+- ✓ Combat with LOS checks, shooting, reloading, ammo tracking
+- ✓ 8-direction movement (qweasdzxc layout)
+- ✓ Vision cone with directional awareness (120° main, 60° peripheral, 180° blind)
+- ✓ Peripheral vision dimmed (50% brightness)
+- ✓ Manual facing control (rotation with , . keys)
 - ✓ Dead entities cannot move or act
-- Actions subdivided into phases for smooth animation
-- Committed actions shown with progress indicators
-- Targeting cursor allows object/enemy selection actions
-- Prior turn actions are visually indicated (who moved, fired, threw grenades)
-- Last-seen enemy positions marked with static indicators
-- Multiple FOW modes available (configurable)
+- ✓ Last-seen enemy markers (ghost positions)
+- ✓ Shared ally vision (combined FOV)
+- ✓ Targeting mode with visual validation feedback
+- Action subdivision for animations (not implemented)
+- Visual action indicators (not implemented)
+- Configurable FOW modes (not implemented)
 
 ---
 
