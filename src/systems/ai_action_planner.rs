@@ -33,6 +33,22 @@ use crate::game_logic::{
 };
 use crate::utils::event_log::EventLog;
 use specs::{Entities, Entity, Join, Read, ReadStorage, System, Write, WriteStorage};
+use std::fs::OpenOptions;
+use std::io::Write as IoWrite;
+use std::time::Instant;
+
+fn debug_log(msg: &str) {
+    if cfg!(debug_assertions) {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/argue_ai_debug.log")
+        {
+            let _ = writeln!(file, "{}", msg);
+        }
+    }
+}
+
 pub struct AIActionPlannerSystem;
 
 impl AIActionPlannerSystem {
@@ -51,7 +67,19 @@ impl AIActionPlannerSystem {
             Rank::Lieutenant => AIPersonality::aggressive(),
             Rank::Sergeant => AIPersonality::balanced(),
             Rank::Corporal => AIPersonality::balanced(),
-            Rank::Private => AIPersonality::defensive(),
+            Rank::Private => {
+                use rand::Rng;
+                let mut rng = rand::rng();
+                let roll = rng.random_range(0.0..1.0);
+
+                if roll < 0.025 {
+                    AIPersonality::scout()
+                } else if roll < 0.05 {
+                    AIPersonality::rearguard()
+                } else {
+                    AIPersonality::defensive()
+                }
+            }
         }
     }
 
@@ -256,6 +284,10 @@ impl<'a> System<'a> for AIActionPlannerSystem {
             }
         }
 
+        let planning_start = if cfg!(debug_assertions) { Some(Instant::now()) } else { None };
+        let mut ai_count = 0;
+        let mut total_actions_evaluated = 0;
+
         for (entity, pos, soldier, budget) in (&entities, &positions, &soldiers, &mut budgets).join()
         {
             if players.get(entity).is_some() {
@@ -270,6 +302,11 @@ impl<'a> System<'a> for AIActionPlannerSystem {
                 continue;
             }
 
+            ai_count += 1;
+            if ai_count <= 3 {
+                debug_log(&format!("[AI_PLAN] Processing AI #{}: {} (faction: {:?})", ai_count, soldier.name, soldier.faction));
+            }
+
             let visible_enemies = self.calculate_visible_enemies(
                 entity,
                 pos,
@@ -281,6 +318,10 @@ impl<'a> System<'a> for AIActionPlannerSystem {
                 &visions,
                 &battlefield,
             );
+
+            if ai_count <= 3 {
+                debug_log(&format!("[AI_PLAN] {} sees {} enemies", soldier.name, visible_enemies.len()));
+            }
 
             let possible_actions = ActionGenerator::generate_actions(
                 entity,
@@ -314,6 +355,10 @@ impl<'a> System<'a> for AIActionPlannerSystem {
 
                 let score = self.score_action(&possible_action, &context, &evaluators);
 
+                if matches!(possible_action.action_type, ActionType::Shoot { .. }) {
+                    debug_log(&format!("[AI] {} Shoot action scored: {:.3}", soldier.name, score));
+                }
+
                 scored_actions.push(ScoredAction {
                     action_type: possible_action.action_type.clone(),
                     target: possible_action.target_entity,
@@ -323,19 +368,30 @@ impl<'a> System<'a> for AIActionPlannerSystem {
                 });
             }
 
+            total_actions_evaluated += scored_actions.len();
+
             if cfg!(debug_assertions) && !scored_actions.is_empty() {
+                let shoot_count = scored_actions.iter().filter(|a| matches!(a.action_type, ActionType::Shoot { .. })).count();
+
                 event_log.add(format!(
-                    "{} considering {} actions (enemies: {})",
+                    "{} considering {} actions (enemies: {}, shoot: {})",
                     soldier.name,
                     scored_actions.len(),
-                    visible_enemies.len()
+                    visible_enemies.len(),
+                    shoot_count
                 ));
+
+                debug_log(&format!("[AI] {} has {} shoot actions out of {} total", soldier.name, shoot_count, scored_actions.len()));
             }
 
             if let Some(best_action) = scored_actions
                 .iter()
                 .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
             {
+                if !visible_enemies.is_empty() {
+                    debug_log(&format!("[AI] {} selected {:?} with score {:.3}", soldier.name, best_action.action_type, best_action.score));
+                }
+
                 match &best_action.action_type {
                     ActionType::Move { .. } => {
                         if let Some(target_pos) = &best_action.position {
@@ -380,6 +436,19 @@ impl<'a> System<'a> for AIActionPlannerSystem {
                         );
                     }
                 }
+            }
+        }
+
+        // Performance summary
+        if cfg!(debug_assertions) {
+            if let Some(start) = planning_start {
+                let elapsed = start.elapsed();
+                debug_log(&format!(
+                    "[PERF] Planning phase: {} AI, {} actions evaluated, {}ms total",
+                    ai_count,
+                    total_actions_evaluated,
+                    elapsed.as_millis()
+                ));
             }
         }
     }
@@ -444,8 +513,23 @@ mod tests {
         let corporal_personality = system.get_personality_for_rank(Rank::Corporal);
         assert_eq!(corporal_personality.name, "Balanced");
 
-        let private_personality = system.get_personality_for_rank(Rank::Private);
-        assert_eq!(private_personality.name, "Defensive");
+        let mut scout_count = 0;
+        let mut rearguard_count = 0;
+        let mut defensive_count = 0;
+
+        for _ in 0..1000 {
+            let private_personality = system.get_personality_for_rank(Rank::Private);
+            match private_personality.name.as_str() {
+                "Scout" => scout_count += 1,
+                "RearGuard" => rearguard_count += 1,
+                "Defensive" => defensive_count += 1,
+                _ => panic!("Unexpected personality: {}", private_personality.name),
+            }
+        }
+
+        assert!(scout_count > 10 && scout_count < 50);
+        assert!(rearguard_count > 10 && rearguard_count < 50);
+        assert!(defensive_count > 900);
     }
 
     #[test]

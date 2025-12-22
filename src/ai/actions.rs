@@ -123,7 +123,7 @@ impl ActionEvaluator {
         let scores: Vec<f32> = self
             .considerations
             .iter()
-            .map(|c| c.evaluate(context))
+            .map(|c| c.evaluate_with_timing(context))  // Use timing wrapper
             .collect();
 
         self.combiner.combine(self.base_score, &scores)
@@ -131,7 +131,7 @@ impl ActionEvaluator {
 }
 
 pub fn create_shoot_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Shoot", 0.8)
+    ActionEvaluator::new("Shoot", 0.9)  // Increased from 0.8 to prioritize combat
         .with_consideration(Box::new(HasLineOfSightConsideration::new(
             ResponseCurve::Boolean { threshold: 0.5 },
         )))
@@ -144,7 +144,7 @@ pub fn create_shoot_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(ThreatLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Multiplicative)
+        .with_combiner(ScoreCombiner::Average)  // Changed from Multiplicative to Average
 }
 
 pub fn create_reload_evaluator() -> ActionEvaluator {

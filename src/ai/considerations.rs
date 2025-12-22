@@ -7,6 +7,7 @@ use crate::game_logic::battlefield::{Battlefield, Position as BattlefieldPos};
 use crate::game_logic::line_of_sight::calculate_fov;
 use crate::game_logic::objectives::Objectives;
 use specs::{Entities, Entity, Join, ReadStorage};
+use std::time::Instant;
 
 pub struct ActionContext<'a> {
     pub actor_entity: Entity,
@@ -30,6 +31,22 @@ pub struct ActionContext<'a> {
 pub trait Consideration: Send + Sync {
     fn evaluate(&self, context: &ActionContext) -> f32;
     fn name(&self) -> &str;
+
+    // Wrapper with timing for debugging
+    fn evaluate_with_timing(&self, context: &ActionContext) -> f32 {
+        if cfg!(debug_assertions) {
+            let start = Instant::now();
+            let result = self.evaluate(context);
+            let elapsed = start.elapsed();
+
+            if elapsed.as_micros() > 100 {  // Log if > 100μs
+                eprintln!("[PERF] {} took {}μs", self.name(), elapsed.as_micros());
+            }
+            result
+        } else {
+            self.evaluate(context)
+        }
+    }
 }
 
 pub struct DistanceToTargetConsideration {
@@ -462,5 +479,314 @@ impl Consideration for NearbyOfficerConsideration {
 
     fn name(&self) -> &str {
         "NearbyOfficer"
+    }
+}
+
+// ============================================================================
+// Tactical Movement Considerations
+// ============================================================================
+
+/// Evaluates danger from being exposed (current cover vs enemy line of sight)
+pub struct ExposedDangerConsideration {
+    curve: ResponseCurve,
+}
+
+impl ExposedDangerConsideration {
+    pub fn new(curve: ResponseCurve) -> Self {
+        Self { curve }
+    }
+}
+
+impl Consideration for ExposedDangerConsideration {
+    fn evaluate(&self, context: &ActionContext) -> f32 {
+        let actor_pos = match context.positions.get(context.actor_entity) {
+            Some(pos) => pos.as_battlefield_pos(),
+            None => return 0.0,
+        };
+
+        // Get current cover quality
+        let current_cover = context.battlefield
+            .get_tile(actor_pos)
+            .map(|t| t.terrain.cover_bonus() as f32)
+            .unwrap_or(0.0);
+
+        // Count enemies that can see us
+        let enemies_with_los = context.visible_enemies.len() as f32;
+
+        // High danger if: low cover + many enemies can see us
+        let cover_factor = 1.0 - (current_cover as f32 / 100.0).min(1.0);
+        let exposure_factor = (enemies_with_los / 5.0).min(1.0); // Normalize to ~5 enemies
+
+        let danger = (cover_factor * 0.6) + (exposure_factor * 0.4);
+
+        self.curve.evaluate(danger.clamp(0.0, 1.0))
+    }
+
+    fn name(&self) -> &str {
+        "ExposedDanger"
+    }
+}
+
+/// Evaluates tactical advantage of target position (range, elevation, flanking)
+pub struct TacticalAdvantageConsideration {
+    curve: ResponseCurve,
+}
+
+impl TacticalAdvantageConsideration {
+    pub fn new(curve: ResponseCurve) -> Self {
+        Self { curve }
+    }
+}
+
+impl Consideration for TacticalAdvantageConsideration {
+    fn evaluate(&self, context: &ActionContext) -> f32 {
+        let actor_pos = match context.positions.get(context.actor_entity) {
+            Some(pos) => pos.as_battlefield_pos(),
+            None => return 0.0,
+        };
+
+        let target_pos = match &context.target_position {
+            Some(pos) => pos,
+            None => return 0.0,
+        };
+
+        // Get target cover quality (moving TO better cover is advantageous)
+        let target_cover = context.battlefield
+            .get_tile(target_pos)
+            .map(|t| t.terrain.cover_bonus() as f32)
+            .unwrap_or(0.0);
+
+        let current_cover = context.battlefield
+            .get_tile(actor_pos)
+            .map(|t| t.terrain.cover_bonus() as f32)
+            .unwrap_or(0.0);
+
+        // Cover improvement factor
+        let cover_improvement = ((target_cover - current_cover) / 100.0).max(0.0).min(1.0);
+
+        // Range factor - check if we'll be at better weapon range
+        let weapon = context.weapons.get(context.actor_entity);
+        let range_advantage = if let Some(weapon) = weapon {
+            if let Some(&first_enemy) = context.visible_enemies.first() {
+                if let Some(enemy_pos) = context.positions.get(first_enemy) {
+                    let current_dist = actor_pos.distance_to(enemy_pos.as_battlefield_pos());
+                    let target_dist = target_pos.distance_to(enemy_pos.as_battlefield_pos());
+                    let effective_range = weapon.stats.effective_range as f32;
+
+                    // Prefer moving toward effective range
+                    let current_range_quality = 1.0 - ((current_dist - effective_range).abs() / effective_range).min(1.0);
+                    let target_range_quality = 1.0 - ((target_dist - effective_range).abs() / effective_range).min(1.0);
+
+                    (target_range_quality - current_range_quality).max(0.0)
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        // Combine factors
+        let advantage = (cover_improvement * 0.7) + (range_advantage * 0.3);
+
+        self.curve.evaluate(advantage.clamp(0.0, 1.0))
+    }
+
+    fn name(&self) -> &str {
+        "TacticalAdvantage"
+    }
+}
+
+/// Evaluates local force balance (friendly:enemy ratio)
+/// OPTIMIZED: Uses visible_enemies heuristic instead of entity iteration
+pub struct ForceBalanceConsideration {
+    curve: ResponseCurve,
+}
+
+impl ForceBalanceConsideration {
+    pub fn new(curve: ResponseCurve) -> Self {
+        Self { curve }
+    }
+}
+
+impl Consideration for ForceBalanceConsideration {
+    fn evaluate(&self, context: &ActionContext) -> f32 {
+        // Fast heuristic: use visible_enemies count as threat indicator
+        // Assumes roughly balanced forces (good enough for tactical decisions)
+        let nearby_enemies = context.visible_enemies.len();
+
+        if nearby_enemies == 0 {
+            return self.curve.evaluate(0.0);
+        }
+
+        // Heuristic: more enemies = higher imbalance/threat
+        // 1-2 enemies = manageable (0.2-0.3)
+        // 3-4 enemies = concerning (0.5-0.6)
+        // 5-6 enemies = critical (0.8-1.0)
+        let imbalance = (nearby_enemies as f32 / 6.0).min(1.0);
+
+        self.curve.evaluate(imbalance)
+    }
+
+    fn name(&self) -> &str {
+        "ForceBalance"
+    }
+}
+
+/// Evaluates proximity to friendly support
+/// OPTIMIZED: Simple heuristic instead of iterating all entities
+pub struct SupportProximityConsideration {
+    curve: ResponseCurve,
+}
+
+impl SupportProximityConsideration {
+    pub fn new(curve: ResponseCurve) -> Self {
+        Self { curve }
+    }
+}
+
+impl Consideration for SupportProximityConsideration {
+    fn evaluate(&self, context: &ActionContext) -> f32 {
+        // Fast heuristic: if enemies are visible but in small numbers,
+        // assume friendlies are nearby (shared vision system)
+        // If many enemies visible, assume we're isolated/forward
+
+        let enemy_count = context.visible_enemies.len();
+
+        if enemy_count == 0 {
+            // No enemies = probably with friendlies or safe area
+            return self.curve.evaluate(0.0);
+        }
+
+        // Simple model:
+        // 1-2 enemies visible = probably in supported position (0.2)
+        // 3-5 enemies visible = might be isolated (0.5-0.7)
+        // 6+ enemies visible = likely isolated/forward (1.0)
+        let isolation = (enemy_count as f32 / 6.0).min(1.0);
+
+        self.curve.evaluate(isolation)
+    }
+
+    fn name(&self) -> &str {
+        "SupportProximity"
+    }
+}
+
+/// Evaluates need to move for objectives
+pub struct ObjectivePressureConsideration {
+    curve: ResponseCurve,
+}
+
+impl ObjectivePressureConsideration {
+    pub fn new(curve: ResponseCurve) -> Self {
+        Self { curve }
+    }
+}
+
+impl Consideration for ObjectivePressureConsideration {
+    fn evaluate(&self, context: &ActionContext) -> f32 {
+        let actor_pos = match context.positions.get(context.actor_entity) {
+            Some(pos) => pos.as_battlefield_pos(),
+            None => return 0.0,
+        };
+
+        let actor_faction = match context.soldiers.get(context.actor_entity) {
+            Some(soldier) => soldier.faction,
+            None => return 0.0,
+        };
+
+        let target_pos = match &context.target_position {
+            Some(pos) => pos,
+            None => return 0.0,
+        };
+
+        // Find nearest enemy-controlled objective
+        let mut nearest_obj_dist = f32::MAX;
+        let mut objective_found = false;
+
+        for flag in context.objectives.flags.values() {
+            if flag.owning_faction != actor_faction {
+                let dist = actor_pos.distance_to(&flag.position);
+                if dist < nearest_obj_dist {
+                    nearest_obj_dist = dist;
+                    objective_found = true;
+                }
+            }
+        }
+
+        if !objective_found {
+            return self.curve.evaluate(0.0);
+        }
+
+        // Calculate if moving toward objective
+        let current_dist = nearest_obj_dist;
+        let target_obj_dist = context.objectives.flags.values()
+            .filter(|f| f.owning_faction != actor_faction)
+            .map(|f| target_pos.distance_to(&f.position))
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(f32::MAX);
+
+        // Moving toward objective = high value
+        // Moving away = low value
+        if target_obj_dist < current_dist {
+            let improvement = (current_dist - target_obj_dist) / current_dist;
+            self.curve.evaluate(improvement.clamp(0.0, 1.0))
+        } else {
+            self.curve.evaluate(0.0)
+        }
+    }
+
+    fn name(&self) -> &str {
+        "ObjectivePressure"
+    }
+}
+
+/// Evaluates need to retreat based on health and ammo
+pub struct RetreatNecessityConsideration {
+    curve: ResponseCurve,
+}
+
+impl RetreatNecessityConsideration {
+    pub fn new(curve: ResponseCurve) -> Self {
+        Self { curve }
+    }
+}
+
+impl Consideration for RetreatNecessityConsideration {
+    fn evaluate(&self, context: &ActionContext) -> f32 {
+        let health = match context.healths.get(context.actor_entity) {
+            Some(h) => h,
+            None => return 0.0,
+        };
+
+        let weapon = context.weapons.get(context.actor_entity);
+
+        // Health factor (low health = high retreat need)
+        let health_factor = 1.0 - health.percentage();
+
+        // Ammo factor (low ammo = moderate retreat need)
+        let ammo_factor = if let Some(weapon) = weapon {
+            let ammo_ratio = weapon.ammo.current as f32 / weapon.ammo.max_capacity as f32;
+            (1.0 - ammo_ratio) * 0.5 // Less weight than health
+        } else {
+            0.0
+        };
+
+        // Enemy presence factor (wounded + enemies nearby = urgent retreat)
+        let enemy_pressure = if !context.visible_enemies.is_empty() && health_factor > 0.3 {
+            0.3 // Boost retreat urgency if wounded and enemies visible
+        } else {
+            0.0
+        };
+
+        let retreat_necessity = health_factor + ammo_factor + enemy_pressure;
+
+        self.curve.evaluate(retreat_necessity.clamp(0.0, 1.0))
+    }
+
+    fn name(&self) -> &str {
+        "RetreatNecessity"
     }
 }

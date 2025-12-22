@@ -5,6 +5,20 @@ use crate::game_logic::battlefield::{Battlefield, Position as BattlefieldPos};
 use crate::game_logic::objectives::Objectives;
 use specs::{Entity, ReadStorage};
 use std::collections::HashSet;
+use std::fs::OpenOptions;
+use std::io::Write as IoWrite;
+
+fn debug_log(msg: &str) {
+    if cfg!(debug_assertions) {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/argue_ai_debug.log")
+        {
+            let _ = writeln!(file, "{}", msg);
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct PossibleAction {
@@ -92,10 +106,18 @@ impl ActionGenerator {
 
         let weapon = match actor_weapon {
             Some(w) => w,
-            None => return actions,
+            None => {
+                if !visible_enemies.is_empty() {
+                    debug_log("[SHOOT] No weapon available");
+                }
+                return actions;
+            }
         };
 
         if !weapon.can_fire() {
+            if !visible_enemies.is_empty() {
+                debug_log(&format!("[SHOOT] Weapon cannot fire (ammo: {}/{})", weapon.ammo.current, weapon.ammo.max_capacity));
+            }
             return actions;
         }
 
@@ -109,8 +131,14 @@ impl ActionGenerator {
                             .with_target(enemy)
                             .with_position(*enemy_pos.as_battlefield_pos()),
                     );
+                } else {
+                    debug_log(&format!("[SHOOT] Enemy out of range: {:.1} > {}", distance, weapon.stats.max_range));
                 }
             }
+        }
+
+        if !visible_enemies.is_empty() {
+            debug_log(&format!("[SHOOT] Generated {} shoot actions from {} visible enemies", actions.len(), visible_enemies.len()));
         }
 
         actions

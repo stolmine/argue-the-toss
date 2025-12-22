@@ -1,6 +1,6 @@
 # Argue the Toss - Development Roadmap
 
-## Project Status: Phase 3 - 100% Complete, Phase 5 - 60% Complete, Phase 6 - 70% Complete
+## Project Status: Phase 3 - 100% Complete, Phase 5 - 80% Complete, Phase 6 - 70% Complete
 
 ### Current Phase: Phase 0 - Project Setup
 **Status:** Completed
@@ -232,15 +232,21 @@
 
 ### Phase 5: Simulation Depth
 **Target:** AI and character systems
-**Status:** 60% Complete
+**Status:** 80% Complete
 
 #### Completed Tasks
 - [x] **AI opponents (individual soldier behavior)**
   - [x] **Utility-based AI system with action scoring**
   - [x] **Response curves (7 types: linear, polynomial, logistic, etc.)**
-  - [x] **Considerations system (8 evaluators: distance, ammo, health, LOS, threat, cover, objective, allies)**
-  - [x] **Action generation and scoring**
-  - [x] **AI personalities (Aggressive, Defensive, Balanced, Objective-Focused)**
+  - [x] **Considerations system (14 evaluators total)**
+    - [x] **Core: distance, ammo, health, LOS, threat, cover, objective, allies**
+    - [x] **Tactical: ExposedDanger, TacticalAdvantage, ForceBalance, SupportProximity, ObjectivePressure, RetreatNecessity**
+  - [x] **Action generation and scoring (Average scoring for shoot actions)**
+  - [x] **AI personalities (6 types: Aggressive, Defensive, Balanced, Objective-Focused, Scout, RearGuard)**
+  - [x] **AI combat engagement (AI shoots at enemies competitively)**
+  - [x] **Tactical movement AI (context-aware repositioning)**
+  - [x] **Performance optimization (eliminated expensive entity iteration)**
+  - [x] **Performance debugging system (consideration timing, turn metrics)**
 - [x] **Rank and progression system**
   - [x] **5 WWI ranks (Captain, Lieutenant, Sergeant, Corporal, Private)**
   - [x] **Rank-based icons (★☆●○■) with faction colors**
@@ -252,6 +258,7 @@
   - [x] **Stats integrated with combat, movement, and vision systems**
 - [x] **AI allies (squad coordination)**
   - [x] **Rank-based AI personalities (officers aggressive, privates defensive)**
+  - [x] **Specialized roles (2.5% Scouts, 2.5% RearGuards among Privates)**
   - [x] **Officer following behavior (privates follow nearby officers)**
   - [x] **Emergent squad cohesion through utility AI**
 
@@ -265,10 +272,14 @@
 - [ ] Experience system (kills, accuracy tracking)
 
 #### Success Criteria
-- ✓ **AI soldiers make tactical decisions (utility-based AI)**
+- ✓ **AI soldiers make tactical decisions (utility-based AI with 14 considerations)**
+- ✓ **AI actively engages in combat (shoot actions score competitively)**
+- ✓ **AI exhibits tactical movement (cover seeking, force balance, retreat logic)**
 - ✓ **AI behavior varies by rank (officers lead, privates follow)**
+- ✓ **Specialized AI roles (Scouts explore, RearGuards defend)**
 - ✓ **Character stats affect gameplay (accuracy, HP, vision, speed)**
 - ✓ **Squad coordination emerges naturally (officer following)**
+- ✓ **Performance optimized (fast heuristics replace expensive iterations)**
 - Morale affects unit behavior (not implemented)
 - Characters gain experience and improve (not implemented)
 - Squad formations provide tactical benefits (partial - emergent only)
@@ -431,4 +442,51 @@ _(To be tracked as development progresses)_
 
 ---
 
-*Last updated: 2025-12-21 (late evening)*
+## Latest Update (2025-12-21 evening)
+
+### AI Combat & Tactical Intelligence Overhaul
+
+**Problem Solved:** AI was not engaging in combat - shoot actions scored near-zero due to multiplicative scoring crushing values.
+
+**Solutions Implemented:**
+
+1. **Combat Engagement Fix**
+   - Changed shoot evaluators from Multiplicative to Average scoring
+   - Increased shoot base scores (0.9-1.0 for aggressive personalities)
+   - AI now shoots competitively (scores 0.5-0.8 vs Move 0.7-0.9)
+
+2. **Tactical Movement AI** - 6 new considerations for context-aware decisions:
+   - **ExposedDanger:** Evaluates cover quality vs enemy LOS
+   - **TacticalAdvantage:** Cover improvement + optimal weapon range positioning
+   - **ForceBalance:** Threat assessment based on visible enemy count
+   - **SupportProximity:** Isolation detection (enemy count heuristic)
+   - **ObjectivePressure:** Movement toward/away from objectives
+   - **RetreatNecessity:** Health + ammo + enemy presence urgency
+
+3. **Performance Optimization**
+   - Eliminated expensive entity iteration (ForceBalance, SupportProximity)
+   - Fast heuristics based on visible_enemies (already calculated)
+   - Added performance timing: logs considerations >100μs
+   - Per-turn metrics: AI count, actions evaluated, total ms
+
+4. **New AI Personalities**
+   - **Scout (2.5% of Privates):** High exploration priority, low combat engagement, willing to take risks
+   - **RearGuard (2.5% of Privates):** Defensive positioning, objective defense, stays near allies
+   - Total personalities: 6 (Aggressive, Defensive, Balanced, Objective-Focused, Scout, RearGuard)
+
+**Technical Details:**
+- Move evaluators now use 6 tactical considerations vs previous 2
+- Optimized considerations use visible_enemies count (O(1)) instead of entity iteration (O(n))
+- Performance debugging logs to `/tmp/argue_ai_debug.log`
+- Scout: Move 0.8, SeekObjective 0.9, Shoot 0.5, SeekCover 0.3
+- RearGuard: Move 0.3, SeekCover 0.8, SeekObjective 0.7, Shoot 0.6
+
+**Impact:**
+- AI now engages in combat consistently
+- Movement decisions are tactically intelligent (cover, force balance, retreat logic)
+- Performance improved: no frame stuttering from expensive calculations
+- Diverse AI behavior: scouts push forward, rearguards defend, officers lead charges
+
+---
+
+*Last updated: 2025-12-21 (late evening) - AI combat & tactical intelligence overhaul*
