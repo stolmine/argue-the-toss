@@ -19,7 +19,8 @@
       "Bash(find:*)",
       "Bash(cargo add:*)",
       "Bash(cargo check:*)",
-      "Bash(timeout 3 cargo run:*)"
+      "Bash(timeout 3 cargo run:*)",
+      "Bash(python3:*)"
     ]
   }
 }

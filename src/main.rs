@@ -40,7 +40,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Text},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
 use specs::{Builder, DispatcherBuilder, Join, World, WorldExt};
@@ -437,12 +437,43 @@ impl GameState {
                 if let Some(target) = target_entity {
                     // Queue shoot action for player
                     if let Some(player_entity) = self.get_player_entity() {
-                        let action = QueuedAction::new(ActionType::Shoot { target });
-                        let mut actions = self.world.write_storage::<QueuedAction>();
-                        actions.insert(player_entity, action).ok();
+                        // Safety check: Don't allow dead player to act
+                        {
+                            let deads = self.world.read_storage::<Dead>();
+                            if deads.get(player_entity).is_some() {
+                                self.world.write_resource::<EventLog>()
+                                    .add("You are dead!".to_string());
+                                self.input_mode = InputMode::Command;
+                                return;
+                            }
+                        }
 
-                        let mut log = self.world.write_resource::<EventLog>();
-                        log.add("Shoot action queued.".to_string());
+                        let action_type = ActionType::Shoot { target };
+                        let time_cost = action_type.base_time_cost();
+
+                        // Consume time budget and queue action
+                        let mut time_budgets = self.world.write_storage::<TimeBudget>();
+                        let mut queued_actions = self.world.write_storage::<QueuedAction>();
+
+                        if let Some(budget) = time_budgets.get_mut(player_entity) {
+                            budget.consume_time(time_cost);
+
+                            queued_actions
+                                .insert(player_entity, QueuedAction::new(action_type))
+                                .ok();
+
+                            self.world.write_resource::<EventLog>()
+                                .add(format!("Shoot action queued ({:.1}s)", time_cost));
+
+                            // Check if turn should end (budget exhausted or in debt)
+                            if budget.available_time() <= 0.0 {
+                                let mut turn_state = self.world.write_resource::<TurnState>();
+                                turn_state.mark_entity_ready(player_entity);
+
+                                self.world.write_resource::<EventLog>()
+                                    .add("Time budget exhausted. Waiting for others...".to_string());
+                            }
+                        }
                     }
                 } else {
                     let mut log = self.world.write_resource::<EventLog>();
@@ -498,12 +529,42 @@ impl GameState {
         use specs::WorldExt;
 
         if let Some(player_entity) = self.get_player_entity() {
-            let action = QueuedAction::new(ActionType::Reload);
-            let mut actions = self.world.write_storage::<QueuedAction>();
-            actions.insert(player_entity, action).ok();
+            // Safety check: Don't allow dead player to act
+            {
+                let deads = self.world.read_storage::<Dead>();
+                if deads.get(player_entity).is_some() {
+                    self.world.write_resource::<EventLog>()
+                        .add("You are dead!".to_string());
+                    return;
+                }
+            }
 
-            let mut log = self.world.write_resource::<EventLog>();
-            log.add("Reload action queued.".to_string());
+            let action_type = ActionType::Reload;
+            let time_cost = action_type.base_time_cost();
+
+            // Consume time budget and queue action
+            let mut time_budgets = self.world.write_storage::<TimeBudget>();
+            let mut queued_actions = self.world.write_storage::<QueuedAction>();
+
+            if let Some(budget) = time_budgets.get_mut(player_entity) {
+                budget.consume_time(time_cost);
+
+                queued_actions
+                    .insert(player_entity, QueuedAction::new(action_type))
+                    .ok();
+
+                self.world.write_resource::<EventLog>()
+                    .add(format!("Reload action queued ({:.1}s)", time_cost));
+
+                // Check if turn should end (budget exhausted or in debt)
+                if budget.available_time() <= 0.0 {
+                    let mut turn_state = self.world.write_resource::<TurnState>();
+                    turn_state.mark_entity_ready(player_entity);
+
+                    self.world.write_resource::<EventLog>()
+                        .add("Time budget exhausted. Waiting for others...".to_string());
+                }
+            }
         }
     }
 
@@ -522,13 +583,33 @@ impl GameState {
                 }
             }
 
-            let action = QueuedAction::new(ActionType::Rotate { clockwise });
-            let mut actions = self.world.write_storage::<QueuedAction>();
-            actions.insert(player_entity, action).ok();
+            let action_type = ActionType::Rotate { clockwise };
+            let time_cost = action_type.base_time_cost();
 
-            let direction = if clockwise { "clockwise" } else { "counter-clockwise" };
-            let mut log = self.world.write_resource::<EventLog>();
-            log.add(format!("Rotating {}.", direction));
+            // Consume time budget and queue action
+            let mut time_budgets = self.world.write_storage::<TimeBudget>();
+            let mut queued_actions = self.world.write_storage::<QueuedAction>();
+
+            if let Some(budget) = time_budgets.get_mut(player_entity) {
+                budget.consume_time(time_cost);
+
+                queued_actions
+                    .insert(player_entity, QueuedAction::new(action_type))
+                    .ok();
+
+                let direction = if clockwise { "clockwise" } else { "counter-clockwise" };
+                self.world.write_resource::<EventLog>()
+                    .add(format!("Rotate {} queued ({:.1}s)", direction, time_cost));
+
+                // Check if turn should end (budget exhausted or in debt)
+                if budget.available_time() <= 0.0 {
+                    let mut turn_state = self.world.write_resource::<TurnState>();
+                    turn_state.mark_entity_ready(player_entity);
+
+                    self.world.write_resource::<EventLog>()
+                        .add("Time budget exhausted. Waiting for others...".to_string());
+                }
+            }
         }
     }
 
@@ -980,7 +1061,9 @@ fn ui(f: &mut Frame, state: &GameState) {
             .collect()
     };
 
-    let event_paragraph = Paragraph::new(Text::from(event_lines)).block(event_log_block);
+    let event_paragraph = Paragraph::new(Text::from(event_lines))
+        .block(event_log_block)
+        .wrap(Wrap { trim: true });
     f.render_widget(event_paragraph, right_pane_chunks[0]);
 
     // Render context info (bottom of right pane)

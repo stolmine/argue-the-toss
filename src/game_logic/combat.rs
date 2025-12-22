@@ -176,4 +176,38 @@ mod tests {
         let hit_chance = calculate_hit_chance(&weapon, distance);
         assert_eq!(hit_chance, 0.0);
     }
+
+    #[test]
+    fn test_random_distribution() {
+        // Test that the RNG is actually producing values in [0.0, 1.0)
+        let mut rng = rand::rng();
+        for _ in 0..100 {
+            let roll: f32 = rng.random();
+            assert!(roll >= 0.0 && roll < 1.0, "Random value out of range: {}", roll);
+        }
+    }
+
+    #[test]
+    fn test_multiple_shots() {
+        // Test that shots actually hit sometimes at close range
+        let weapon = Weapon::rifle();
+        let shooter_pos = Position::new(50, 50);
+        let target_pos = Position::new(55, 52); // ~7 tiles away
+        let battlefield = Battlefield::new(100, 100);
+        let shooter_vision = 10;
+
+        let mut hits = 0;
+        for _ in 0..100 {
+            let result = calculate_shot(&weapon, &shooter_pos, &target_pos, &battlefield, shooter_vision);
+            if result.hit {
+                hits += 1;
+            }
+        }
+
+        // At ~7 tiles distance (within effective range), we should have base_accuracy (70%)
+        // Over 100 shots, we expect around 70 hits +/- some variance
+        // Allow for statistical variance: 50-90 hits is reasonable
+        println!("Hits: {}/100 ({}%)", hits, hits);
+        assert!(hits >= 50 && hits <= 90, "Hit rate seems wrong: {}/100. Expected around 70/100", hits);
+    }
 }
