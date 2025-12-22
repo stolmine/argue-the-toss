@@ -1,5 +1,22 @@
 // Action Execution System
 // Executes committed actions during Execution phase
+//
+// CRITICAL DEPENDENCY: This system MUST run AFTER TurnManagerSystem!
+// TurnManagerSystem handles phase transitions (Planning -> Execution -> Resolution).
+// If ActionExecutionSystem runs before TurnManagerSystem, it will see the OLD phase
+// and skip execution, causing the "movement bug" where actions are logged but entities
+// don't move on screen.
+//
+// Correct execution order (in a single dispatcher.dispatch() call):
+// 1. TurnManagerSystem transitions Planning -> Execution
+// 2. ActionExecutionSystem sees Execution phase and executes actions
+//
+// Incorrect order causes:
+// 1. ActionExecutionSystem sees Planning phase, returns early
+// 2. TurnManagerSystem transitions Planning -> Execution (too late!)
+//
+// This system also requires WriteStorage<Position> to update entity positions.
+// If Position is accidentally changed to ReadStorage, moves will not apply.
 
 use crate::components::{
     action::{ActionType, OngoingAction, QueuedAction},
@@ -8,6 +25,7 @@ use crate::components::{
     health::Health,
     position::Position,
     soldier::Soldier,
+    soldier_stats::SoldierStats,
     vision::Vision,
     weapon::Weapon,
 };
@@ -22,7 +40,7 @@ pub struct ActionExecutionSystem;
 impl<'a> System<'a> for ActionExecutionSystem {
     type SystemData = (
         Entities<'a>,
-        ReadStorage<'a, QueuedAction>,
+        WriteStorage<'a, QueuedAction>,
         WriteStorage<'a, Position>,
         WriteStorage<'a, Facing>,
         WriteStorage<'a, OngoingAction>,
@@ -31,6 +49,7 @@ impl<'a> System<'a> for ActionExecutionSystem {
         WriteStorage<'a, Dead>,
         ReadStorage<'a, Vision>,
         ReadStorage<'a, Soldier>,
+        ReadStorage<'a, SoldierStats>,
         Write<'a, EventLog>,
         Read<'a, TurnState>,
         Read<'a, Battlefield>,
@@ -40,7 +59,7 @@ impl<'a> System<'a> for ActionExecutionSystem {
         &mut self,
         (
             entities,
-            queued,
+            mut queued,
             mut positions,
             mut facings,
             mut _ongoing,
@@ -49,6 +68,7 @@ impl<'a> System<'a> for ActionExecutionSystem {
             mut dead_markers,
             visions,
             soldiers,
+            soldier_stats,
             mut log,
             turn_state,
             battlefield,
@@ -77,13 +97,25 @@ impl<'a> System<'a> for ActionExecutionSystem {
                     terrain_cost: _,
                 } => {
                     if let Some(pos) = positions.get_mut(entity) {
-                        let new_x = pos.x() + dx;
-                        let new_y = pos.y() + dy;
+                        let old_x = pos.x();
+                        let old_y = pos.y();
+                        let new_x = old_x + dx;
+                        let new_y = old_y + dy;
                         // Boundary check (from battlefield size)
                         if new_x >= 0 && new_x < 100 && new_y >= 0 && new_y < 100 {
                             *pos = Position::new(new_x, new_y);
-                            log.add(format!("Entity moved to ({}, {})", new_x, new_y));
+                            if let Some(soldier) = soldiers.get(entity) {
+                                log.add(format!("{} moved from ({}, {}) to ({}, {})",
+                                    soldier.name, old_x, old_y, new_x, new_y));
+                            } else {
+                                log.add(format!("Entity moved from ({}, {}) to ({}, {})",
+                                    old_x, old_y, new_x, new_y));
+                            }
+                        } else {
+                            log.add(format!("Move blocked: ({}, {}) out of bounds", new_x, new_y));
                         }
+                    } else {
+                        log.add("Move failed: entity has no position component".to_string());
                     }
                 }
                 ActionType::Rotate { clockwise } => {
@@ -115,6 +147,7 @@ impl<'a> System<'a> for ActionExecutionSystem {
                         &mut dead_markers,
                         &visions,
                         &soldiers,
+                        &soldier_stats,
                         &mut log,
                         &battlefield,
                     );
@@ -140,8 +173,17 @@ impl<'a> System<'a> for ActionExecutionSystem {
             }
         }
 
-        // Clear executed actions after processing
-        // (done by cleanup system in turn manager)
+        // Remove executed actions
+        let mut to_remove = Vec::new();
+        for (entity, action) in (&entities, &queued).join() {
+            if action.committed {
+                to_remove.push(entity);
+            }
+        }
+
+        for entity in to_remove {
+            queued.remove(entity);
+        }
     }
 }
 
@@ -155,6 +197,7 @@ fn execute_shoot(
     dead_markers: &mut WriteStorage<Dead>,
     visions: &ReadStorage<Vision>,
     soldiers: &ReadStorage<Soldier>,
+    soldier_stats: &ReadStorage<SoldierStats>,
     log: &mut EventLog,
     battlefield: &Battlefield,
 ) {
@@ -194,6 +237,9 @@ fn execute_shoot(
     // Get shooter vision for LOS check
     let shooter_vision = visions.get(shooter).map(|v| v.range).unwrap_or(10);
 
+    // Get shooter accuracy modifier from stats
+    let shooter_accuracy = soldier_stats.get(shooter).map(|stats| stats.accuracy_modifier);
+
     // Calculate shot result
     let result = calculate_shot(
         shooter_weapon,
@@ -201,6 +247,7 @@ fn execute_shoot(
         target_pos,
         battlefield,
         shooter_vision,
+        shooter_accuracy,
     );
 
     // Consume ammo

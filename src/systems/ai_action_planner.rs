@@ -1,14 +1,25 @@
 // AI Action Planning System
-// Generates actions for NPC entities
+// Generates actions for NPC entities using utility-based AI
 
+use crate::ai::{
+    actions::{
+        create_move_evaluator, create_reload_evaluator, create_seek_cover_evaluator,
+        create_seek_objective_evaluator, create_shoot_evaluator, create_wait_evaluator,
+        ActionEvaluator, ScoredAction,
+    },
+    considerations::ActionContext,
+    personality::AIPersonality,
+    ActionGenerator, PossibleAction,
+};
 use crate::components::{
     action::{ActionType, QueuedAction},
     dead::Dead,
+    facing::Facing,
     health::Health,
     pathfinding::PlannedPath,
     player::Player,
     position::Position,
-    soldier::Soldier,
+    soldier::{Faction, Rank, Soldier},
     time_budget::TimeBudget,
     vision::Vision,
     weapon::Weapon,
@@ -20,216 +31,157 @@ use crate::game_logic::{
     pathfinding::calculate_path,
     turn_state::{TurnOrderMode, TurnPhase, TurnState},
 };
-use specs::{Entities, Entity, Join, Read, ReadStorage, System, WriteStorage};
-
+use crate::utils::event_log::EventLog;
+use specs::{Entities, Entity, Join, Read, ReadStorage, System, Write, WriteStorage};
 pub struct AIActionPlannerSystem;
 
-impl<'a> System<'a> for AIActionPlannerSystem {
-    type SystemData = (
-        Entities<'a>,
-        ReadStorage<'a, Position>,
-        ReadStorage<'a, Soldier>,
-        ReadStorage<'a, Player>,
-        ReadStorage<'a, Vision>,
-        ReadStorage<'a, Health>,
-        ReadStorage<'a, Dead>,
-        WriteStorage<'a, Weapon>,
-        WriteStorage<'a, TimeBudget>,
-        WriteStorage<'a, QueuedAction>,
-        WriteStorage<'a, PlannedPath>,
-        Read<'a, Battlefield>,
-        Read<'a, TurnState>,
-        Read<'a, Objectives>,
-    );
+impl AIActionPlannerSystem {
+    pub fn new() -> Self {
+        Self
+    }
 
-    fn run(
-        &mut self,
-        (
-            entities,
-            positions,
-            soldiers,
-            players,
-            visions,
-            healths,
-            dead_markers,
-            mut weapons,
-            mut budgets,
-            mut queued,
-            mut paths,
-            battlefield,
-            turn_state,
-            objectives,
-        ): Self::SystemData,
+    fn get_evaluators(&self, rank: Rank) -> Vec<ActionEvaluator> {
+        let personality = self.get_personality_for_rank(rank);
+        personality.evaluators
+    }
+
+    fn get_personality_for_rank(&self, rank: Rank) -> AIPersonality {
+        match rank {
+            Rank::Captain => AIPersonality::objective_focused(),
+            Rank::Lieutenant => AIPersonality::aggressive(),
+            Rank::Sergeant => AIPersonality::balanced(),
+            Rank::Corporal => AIPersonality::balanced(),
+            Rank::Private => AIPersonality::defensive(),
+        }
+    }
+
+    fn calculate_visible_enemies(
+        &self,
+        entity: Entity,
+        pos: &Position,
+        soldier: &Soldier,
+        entities: &Entities,
+        positions: &ReadStorage<Position>,
+        soldiers: &ReadStorage<Soldier>,
+        healths: &ReadStorage<Health>,
+        visions: &ReadStorage<Vision>,
+        battlefield: &Battlefield,
+    ) -> Vec<Entity> {
+        let ai_faction = soldier.faction;
+        let vision_range = visions.get(entity).map(|v| v.range).unwrap_or(10);
+        let visible_tiles = calculate_fov(&pos.as_battlefield_pos(), vision_range, battlefield);
+
+        (entities, positions, soldiers, healths)
+            .join()
+            .filter(|(e, _, _, _)| *e != entity)
+            .filter(|(_, target_pos, target_soldier, target_health)| {
+                target_soldier.faction != ai_faction
+                    && target_health.is_alive()
+                    && visible_tiles.contains(&target_pos.as_battlefield_pos())
+            })
+            .map(|(e, _, _, _)| e)
+            .collect()
+    }
+
+    fn score_action(
+        &self,
+        action: &PossibleAction,
+        context: &ActionContext,
+        evaluators: &Vec<ActionEvaluator>,
+    ) -> f32 {
+        let mut max_score: f32 = 0.0;
+        let mut matched = false;
+
+        for evaluator in evaluators {
+            if self.evaluator_matches_action(&evaluator.name, &action.action_type) {
+                let score = evaluator.evaluate(context);
+                max_score = max_score.max(score);
+                matched = true;
+            }
+        }
+
+        if !matched {
+            return 0.0;
+        }
+
+        max_score
+    }
+
+    fn evaluator_matches_action(&self, evaluator_name: &str, action_type: &ActionType) -> bool {
+        match action_type {
+            ActionType::Shoot { .. } => evaluator_name.contains("Shoot"),
+            ActionType::Reload => evaluator_name.contains("Reload"),
+            ActionType::Move { .. } => {
+                evaluator_name.contains("Move")
+                    || evaluator_name.contains("Cover")
+                    || evaluator_name.contains("Objective")
+            }
+            ActionType::Rotate { .. } => evaluator_name.contains("Rotate"),
+            ActionType::Wait => evaluator_name.contains("Wait"),
+            _ => false,
+        }
+    }
+
+    fn queue_action(
+        &self,
+        entity: Entity,
+        action: &ScoredAction,
+        queued: &mut WriteStorage<QueuedAction>,
+        budget: &mut TimeBudget,
+        event_log: &mut EventLog,
+        soldier_name: Option<&str>,
     ) {
-        // Only plan during Planning phase
-        if !matches!(turn_state.phase, TurnPhase::Planning) {
-            return;
-        }
+        let time_cost = action.action_type.base_time_cost();
 
-        // For PlayerFirst mode: only plan for NPCs after player is ready
-        if matches!(turn_state.turn_order_mode, TurnOrderMode::PlayerFirst) {
-            // Check if player entity is ready
-            let player_ready = (&entities, &players)
-                .join()
-                .any(|(e, _)| turn_state.is_entity_ready(e));
-
-            if !player_ready {
-                return; // Wait for player to finish
-            }
-        }
-
-        // Plan actions for all NPCs (non-player entities with time budgets)
-        for (entity, pos, soldier, budget) in (&entities, &positions, &soldiers, &mut budgets).join()
-        {
-            // Skip if this is the player
-            if players.get(entity).is_some() {
-                continue;
-            }
-
-            // Skip if entity is dead
-            if dead_markers.get(entity).is_some() {
-                continue;
-            }
-
-            // Skip if entity already has action queued or is out of time
-            if queued.get(entity).is_some() || budget.available_time() <= 0.0 {
-                continue;
-            }
-
-            // Extensible AI decision-making: Priority-based action selection
-            // This makes it easy to add new behaviors - just add a new decision function!
-
-            // Priority 1: Reload if out of ammo
-            if try_reload(entity, &mut weapons, &mut queued, budget) {
-                continue;
-            }
-
-            // Priority 2: Shoot at visible enemies
-            if try_shoot_enemy(
+        budget.consume_time(time_cost);
+        queued
+            .insert(
                 entity,
-                pos,
-                soldier,
-                &entities,
-                &positions,
-                &soldiers,
-                &healths,
-                &visions,
-                &mut queued,
-                budget,
-                &battlefield,
-            ) {
-                continue;
-            }
+                QueuedAction {
+                    action_type: action.action_type.clone(),
+                    time_cost,
+                    committed: true,
+                },
+            )
+            .ok();
 
-            // Priority 3: Move toward enemy (find enemies first, then pathfind)
-            if try_move_toward_enemy(
-                entity,
-                pos,
-                soldier,
-                &entities,
-                &positions,
-                &soldiers,
-                &mut paths,
-                &mut queued,
-                budget,
-                &battlefield,
-            ) {
-                continue;
+        if cfg!(debug_assertions) {
+            if let Some(name) = soldier_name {
+                event_log.add(format!(
+                    "AI {}: {:?} (score: {:.2})",
+                    name,
+                    action.action_type,
+                    action.score
+                ));
             }
-
-            // Priority 4: Move toward enemy objective flag
-            if try_move_toward_objective(
-                entity,
-                pos,
-                soldier,
-                &mut paths,
-                &objectives,
-                &battlefield,
-            ) {
-                continue;
-            }
-
-            // Priority 5: Wait (fallback)
-            queue_wait_action(entity, &mut queued, budget);
         }
     }
-}
 
-/// Extensible AI helper: Try to reload if weapon needs it
-fn try_reload(
-    entity: Entity,
-    weapons: &mut WriteStorage<Weapon>,
-    queued: &mut WriteStorage<QueuedAction>,
-    budget: &mut TimeBudget,
-) -> bool {
-    if let Some(weapon) = weapons.get_mut(entity) {
-        if weapon.ammo.is_empty() && !weapon.ammo.is_full() {
-            let action = ActionType::Reload;
-            let time_cost = action.base_time_cost();
+    fn queue_move_action(
+        &self,
+        entity: Entity,
+        target_pos: &crate::game_logic::battlefield::Position,
+        current_pos: &Position,
+        battlefield: &Battlefield,
+        queued: &mut WriteStorage<QueuedAction>,
+        budget: &mut TimeBudget,
+    ) -> bool {
+        let dx = target_pos.x - current_pos.x();
+        let dy = target_pos.y - current_pos.y();
 
-            budget.consume_time(time_cost);
-            queued
-                .insert(
-                    entity,
-                    QueuedAction {
-                        action_type: action,
-                        time_cost,
-                        committed: true,
-                    },
-                )
-                .ok();
-            return true;
+        if dx == 0 && dy == 0 {
+            return false;
         }
-    }
-    false
-}
 
-/// Extensible AI helper: Try to shoot at visible enemies
-fn try_shoot_enemy(
-    entity: Entity,
-    pos: &Position,
-    soldier: &Soldier,
-    entities: &Entities,
-    positions: &ReadStorage<Position>,
-    soldiers: &ReadStorage<Soldier>,
-    healths: &ReadStorage<Health>,
-    visions: &ReadStorage<Vision>,
-    queued: &mut WriteStorage<QueuedAction>,
-    budget: &mut TimeBudget,
-    battlefield: &Battlefield,
-) -> bool {
-    // Get AI's faction
-    let ai_faction = soldier.faction;
+        let terrain_cost = battlefield
+            .get_tile(target_pos)
+            .map(|t| t.terrain.movement_cost())
+            .unwrap_or(1.0);
 
-    // Get vision range
-    let vision_range = visions.get(entity).map(|v| v.range).unwrap_or(10);
-
-    // Calculate FOV
-    let visible_tiles = calculate_fov(&pos.as_battlefield_pos(), vision_range, battlefield);
-
-    // Find visible enemies (alive and different faction)
-    let target = (entities, positions, soldiers, healths)
-        .join()
-        .filter(|(e, _, _, _)| *e != entity) // Not self
-        .filter(|(_, target_pos, target_soldier, target_health)| {
-            // Different faction
-            target_soldier.faction != ai_faction
-                // Alive
-                && target_health.is_alive()
-                // In FOV
-                && visible_tiles.contains(&target_pos.as_battlefield_pos())
-        })
-        .min_by_key(|(_, target_pos, _, _)| {
-            // Pick closest enemy
-            let dx = (pos.x() - target_pos.x()).abs();
-            let dy = (pos.y() - target_pos.y()).abs();
-            dx + dy
-        })
-        .map(|(e, _, _, _)| e);
-
-    if let Some(target_entity) = target {
-        let action = ActionType::Shoot {
-            target: target_entity,
+        let action = ActionType::Move {
+            dx,
+            dy,
+            terrain_cost,
         };
         let time_cost = action.base_time_cost();
 
@@ -244,105 +196,266 @@ fn try_shoot_enemy(
                 },
             )
             .ok();
-        return true;
-    }
 
-    false
+        true
+    }
 }
 
-/// Extensible AI helper: Try to move toward nearest enemy
-fn try_move_toward_enemy(
-    entity: Entity,
-    pos: &Position,
-    soldier: &Soldier,
-    entities: &Entities,
-    positions: &ReadStorage<Position>,
-    soldiers: &ReadStorage<Soldier>,
-    paths: &mut WriteStorage<PlannedPath>,
-    _queued: &mut WriteStorage<QueuedAction>,
-    _budget: &mut TimeBudget,
-    battlefield: &Battlefield,
-) -> bool {
-    let ai_faction = soldier.faction;
+impl<'a> System<'a> for AIActionPlannerSystem {
+    type SystemData = (
+        Entities<'a>,
+        ReadStorage<'a, Position>,
+        ReadStorage<'a, Soldier>,
+        ReadStorage<'a, Player>,
+        ReadStorage<'a, Vision>,
+        ReadStorage<'a, Health>,
+        ReadStorage<'a, Dead>,
+        ReadStorage<'a, Weapon>,
+        ReadStorage<'a, Facing>,
+        WriteStorage<'a, TimeBudget>,
+        WriteStorage<'a, QueuedAction>,
+        WriteStorage<'a, PlannedPath>,
+        Read<'a, Battlefield>,
+        Read<'a, TurnState>,
+        Read<'a, Objectives>,
+        Write<'a, EventLog>,
+    );
 
-    // Find all enemy positions
-    let enemy_positions: Vec<_> = (entities, positions, soldiers)
-        .join()
-        .filter(|(e, _, enemy_soldier)| *e != entity && enemy_soldier.faction != ai_faction)
-        .map(|(_, enemy_pos, _)| enemy_pos.as_battlefield_pos().clone())
-        .collect();
-
-    if enemy_positions.is_empty() {
-        return false;
-    }
-
-    // Find closest enemy
-    let ai_pos = pos.as_battlefield_pos();
-    let closest_enemy = enemy_positions
-        .iter()
-        .min_by_key(|enemy_pos| {
-            let dist = ai_pos.distance_to(enemy_pos);
-            (dist * 100.0) as i32 // Convert to int for comparison
-        })
-        .unwrap();
-
-    // Only pathfind if not already adjacent
-    if ai_pos.distance_to(closest_enemy) > 1.5 {
-        if let Some(path_steps) = calculate_path(ai_pos, closest_enemy, battlefield) {
-            // Insert PlannedPath component (no preview for AI)
-            paths
-                .insert(entity, PlannedPath::new(path_steps, 0.0, false))
-                .ok();
-            return true; // PathExecutionSystem will handle the movement
+    fn run(
+        &mut self,
+        (
+            entities,
+            positions,
+            soldiers,
+            players,
+            visions,
+            healths,
+            dead_markers,
+            weapons,
+            facings,
+            mut budgets,
+            mut queued,
+            mut paths,
+            battlefield,
+            turn_state,
+            objectives,
+            mut event_log,
+        ): Self::SystemData,
+    ) {
+        if !matches!(turn_state.phase, TurnPhase::Planning) {
+            return;
         }
-    }
 
-    false
-}
+        if matches!(turn_state.turn_order_mode, TurnOrderMode::PlayerFirst) {
+            let player_ready = (&entities, &players)
+                .join()
+                .any(|(e, _)| turn_state.is_entity_ready(e));
 
-/// Extensible AI helper: Try to move toward enemy objective flag
-fn try_move_toward_objective(
-    entity: Entity,
-    pos: &Position,
-    soldier: &Soldier,
-    paths: &mut WriteStorage<PlannedPath>,
-    objectives: &Objectives,
-    battlefield: &Battlefield,
-) -> bool {
-    if let Some(flag_pos) = objectives.get_enemy_flag_position(soldier.faction) {
-        let ai_pos = pos.as_battlefield_pos();
+            if !player_ready {
+                return;
+            }
+        }
 
-        if ai_pos.distance_to(&flag_pos) > 1.5 {
-            if let Some(path_steps) = calculate_path(ai_pos, &flag_pos, battlefield) {
-                paths
-                    .insert(entity, PlannedPath::new(path_steps, 0.0, false))
-                    .ok();
-                return true;
+        for (entity, pos, soldier, budget) in (&entities, &positions, &soldiers, &mut budgets).join()
+        {
+            if players.get(entity).is_some() {
+                continue;
+            }
+
+            if dead_markers.get(entity).is_some() {
+                continue;
+            }
+
+            if queued.get(entity).is_some() || budget.available_time() <= 0.0 {
+                continue;
+            }
+
+            let visible_enemies = self.calculate_visible_enemies(
+                entity,
+                pos,
+                soldier,
+                &entities,
+                &positions,
+                &soldiers,
+                &healths,
+                &visions,
+                &battlefield,
+            );
+
+            let possible_actions = ActionGenerator::generate_actions(
+                entity,
+                &visible_enemies,
+                &positions,
+                &soldiers,
+                &weapons,
+                &battlefield,
+                &objectives,
+            );
+
+            let evaluators = self.get_evaluators(soldier.rank);
+
+            let mut scored_actions = Vec::new();
+            for possible_action in &possible_actions {
+                let context = ActionContext {
+                    actor_entity: entity,
+                    target_entity: possible_action.target_entity,
+                    target_position: possible_action.target_position,
+                    positions: &positions,
+                    soldiers: &soldiers,
+                    healths: &healths,
+                    weapons: &weapons,
+                    visions: &visions,
+                    facings: &facings,
+                    battlefield: &battlefield,
+                    objectives: &objectives,
+                    entities: &entities,
+                    visible_enemies: &visible_enemies,
+                };
+
+                let score = self.score_action(&possible_action, &context, &evaluators);
+
+                scored_actions.push(ScoredAction {
+                    action_type: possible_action.action_type.clone(),
+                    target: possible_action.target_entity,
+                    position: possible_action.target_position,
+                    score,
+                    debug_info: None,
+                });
+            }
+
+            if cfg!(debug_assertions) && !scored_actions.is_empty() {
+                event_log.add(format!(
+                    "{} considering {} actions (enemies: {})",
+                    soldier.name,
+                    scored_actions.len(),
+                    visible_enemies.len()
+                ));
+            }
+
+            if let Some(best_action) = scored_actions
+                .iter()
+                .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
+            {
+                match &best_action.action_type {
+                    ActionType::Move { .. } => {
+                        if let Some(target_pos) = &best_action.position {
+                            let ai_pos = pos.as_battlefield_pos();
+                            if ai_pos.distance_to(target_pos) > 1.5 {
+                                if let Some(path_steps) =
+                                    calculate_path(ai_pos, target_pos, &battlefield)
+                                {
+                                    paths
+                                        .insert(entity, PlannedPath::new(path_steps, 0.0, false))
+                                        .ok();
+                                } else if ai_pos.distance_to(target_pos) <= 1.5 {
+                                    self.queue_move_action(
+                                        entity,
+                                        target_pos,
+                                        pos,
+                                        &battlefield,
+                                        &mut queued,
+                                        budget,
+                                    );
+                                }
+                            } else {
+                                self.queue_move_action(
+                                    entity,
+                                    target_pos,
+                                    pos,
+                                    &battlefield,
+                                    &mut queued,
+                                    budget,
+                                );
+                            }
+                        }
+                    }
+                    _ => {
+                        self.queue_action(
+                            entity,
+                            best_action,
+                            &mut queued,
+                            budget,
+                            &mut event_log,
+                            Some(&soldier.name),
+                        );
+                    }
+                }
             }
         }
     }
-
-    false
 }
 
-/// Extensible AI helper: Queue a wait action
-fn queue_wait_action(
-    entity: Entity,
-    queued: &mut WriteStorage<QueuedAction>,
-    budget: &mut TimeBudget,
-) {
-    let action = ActionType::Wait;
-    let time_cost = action.base_time_cost();
+impl Default for AIActionPlannerSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-    budget.consume_time(time_cost);
-    queued
-        .insert(
-            entity,
-            QueuedAction {
-                action_type: action,
-                time_cost,
-                committed: true,
-            },
-        )
-        .ok();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::action::ActionType;
+
+    #[test]
+    fn test_evaluator_matches_move_action() {
+        let system = AIActionPlannerSystem::new();
+        let move_action = ActionType::Move { dx: 1, dy: 0, terrain_cost: 1.0 };
+
+        // Move actions should match Move, Cover, and Objective evaluators
+        // This is the key fix - all three evaluators should be able to score move actions
+        assert!(system.evaluator_matches_action("Move", &move_action));
+        assert!(system.evaluator_matches_action("SeekCover", &move_action));
+        assert!(system.evaluator_matches_action("SeekObjective", &move_action));
+        assert!(!system.evaluator_matches_action("Shoot", &move_action));
+        assert!(!system.evaluator_matches_action("Wait", &move_action));
+    }
+
+    #[test]
+    fn test_evaluator_matches_wait_action() {
+        let system = AIActionPlannerSystem::new();
+        let wait_action = ActionType::Wait;
+
+        assert!(system.evaluator_matches_action("Wait", &wait_action));
+        assert!(!system.evaluator_matches_action("Move", &wait_action));
+    }
+
+    #[test]
+    fn test_evaluator_matches_reload_action() {
+        let system = AIActionPlannerSystem::new();
+        let reload_action = ActionType::Reload;
+
+        assert!(system.evaluator_matches_action("Reload", &reload_action));
+        assert!(!system.evaluator_matches_action("Move", &reload_action));
+    }
+
+    #[test]
+    fn test_rank_based_personality_assignment() {
+        let system = AIActionPlannerSystem::new();
+
+        let captain_personality = system.get_personality_for_rank(Rank::Captain);
+        assert_eq!(captain_personality.name, "ObjectiveFocused");
+
+        let lieutenant_personality = system.get_personality_for_rank(Rank::Lieutenant);
+        assert_eq!(lieutenant_personality.name, "Aggressive");
+
+        let sergeant_personality = system.get_personality_for_rank(Rank::Sergeant);
+        assert_eq!(sergeant_personality.name, "Balanced");
+
+        let corporal_personality = system.get_personality_for_rank(Rank::Corporal);
+        assert_eq!(corporal_personality.name, "Balanced");
+
+        let private_personality = system.get_personality_for_rank(Rank::Private);
+        assert_eq!(private_personality.name, "Defensive");
+    }
+
+    #[test]
+    fn test_get_evaluators_returns_personality_evaluators() {
+        let system = AIActionPlannerSystem::new();
+
+        let captain_evaluators = system.get_evaluators(Rank::Captain);
+        assert_eq!(captain_evaluators.len(), 6);
+
+        let private_evaluators = system.get_evaluators(Rank::Private);
+        assert_eq!(private_evaluators.len(), 6);
+    }
 }

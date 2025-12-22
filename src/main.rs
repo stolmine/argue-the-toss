@@ -12,6 +12,7 @@ use argue_the_toss::{
         player::Player,
         position::Position,
         soldier::{Faction, Rank, Soldier},
+        soldier_stats::SoldierStats,
         time_budget::TimeBudget,
         vision::Vision,
         weapon::Weapon,
@@ -22,13 +23,14 @@ use argue_the_toss::{
         objectives::{ObjectiveFlag, Objectives},
         pathfinding::calculate_path,
         shared_vision::calculate_faction_vision,
+        soldier_spawning::{generate_name, generate_soldier_stats, select_random_rank},
         turn_state::TurnState,
     },
     rendering::{viewport::Camera, widgets::BattlefieldWidget},
     systems::{
         action_execution::ActionExecutionSystem, ai_action_planner::AIActionPlannerSystem,
         objective_capture::ObjectiveCaptureSystem, path_execution::PathExecutionSystem,
-        turn_manager::TurnManagerSystem,
+        position_validation::PositionValidationSystem, turn_manager::TurnManagerSystem,
     },
     ui::menu::{
         main_menu::{MainMenuState, MainMenuWidget},
@@ -92,34 +94,48 @@ fn spawn_soldiers(
         panic!("Failed to generate ally spawn positions!");
     }
 
+    let mut rng = rand::rng();
+
     let player_pos = ally_positions[0];
+    let player_rank = Rank::Sergeant;
+    let player_stats = generate_soldier_stats(player_rank, &mut rng);
+    let player_base_stats = player_rank.base_stats();
+    let player_name = generate_name(Faction::Allies, player_rank);
+
     world
         .create_entity()
         .with(Position::new(player_pos.x, player_pos.y))
         .with(Soldier {
-            name: "Pvt. Smith".to_string(),
+            name: player_name,
             faction: Faction::Allies,
-            rank: Rank::Private,
+            rank: player_rank,
         })
         .with(Player)
+        .with(SoldierStats {
+            accuracy_modifier: player_stats.accuracy_modifier,
+            movement_speed_modifier: player_stats.movement_speed_modifier,
+            max_hp_modifier: player_stats.max_hp_modifier,
+            carrying_capacity: player_stats.carrying_capacity,
+        })
         .with(TimeBudget::new(config.time_budget_seconds))
-        .with(Vision::new(10))
+        .with(Vision::new(player_base_stats.vision_range))
         .with(Weapon::rifle())
-        .with(Health::soldier())
+        .with(Health::new(player_base_stats.base_hp + player_stats.max_hp_modifier))
         .with(Facing::new(Direction8::N))
         .build();
-
-    let ally_names = ["Sgt. Jones", "Pvt. Taylor", "Cpl. Brown", "Pvt. Davis", "Pvt. Wilson"];
-    let enemy_names = ["Pvt. Mueller", "Cpl. Schmidt", "Pvt. Weber", "Sgt. Fischer", "Pvt. Bauer"];
 
     for i in 0..soldier_count.min(ally_positions.len() - 1) {
         let pos = ally_positions[i + 1];
 
-        let name = if i < ally_names.len() {
-            ally_names[i].to_string()
+        let rank = if i == 0 {
+            Rank::Sergeant
         } else {
-            format!("Pvt. Ally {}", i + 1)
+            select_random_rank(&mut rng)
         };
+
+        let stats = generate_soldier_stats(rank, &mut rng);
+        let base_stats = rank.base_stats();
+        let name = generate_name(Faction::Allies, rank);
 
         world
             .create_entity()
@@ -127,12 +143,18 @@ fn spawn_soldiers(
             .with(Soldier {
                 name,
                 faction: Faction::Allies,
-                rank: if i == 0 { Rank::Sergeant } else { Rank::Private },
+                rank,
+            })
+            .with(SoldierStats {
+                accuracy_modifier: stats.accuracy_modifier,
+                movement_speed_modifier: stats.movement_speed_modifier,
+                max_hp_modifier: stats.max_hp_modifier,
+                carrying_capacity: stats.carrying_capacity,
             })
             .with(TimeBudget::new(config.time_budget_seconds))
-            .with(Vision::new(10))
+            .with(Vision::new(base_stats.vision_range))
             .with(Weapon::rifle())
-            .with(Health::soldier())
+            .with(Health::new(base_stats.base_hp + stats.max_hp_modifier))
             .with(Facing::new(Direction8::W))
             .build();
     }
@@ -140,11 +162,15 @@ fn spawn_soldiers(
     for i in 0..soldier_count.min(enemy_positions.len()) {
         let pos = enemy_positions[i];
 
-        let name = if i < enemy_names.len() {
-            enemy_names[i].to_string()
+        let rank = if i == 0 {
+            Rank::Sergeant
         } else {
-            format!("Pvt. Enemy {}", i + 1)
+            select_random_rank(&mut rng)
         };
+
+        let stats = generate_soldier_stats(rank, &mut rng);
+        let base_stats = rank.base_stats();
+        let name = generate_name(Faction::CentralPowers, rank);
 
         world
             .create_entity()
@@ -152,12 +178,18 @@ fn spawn_soldiers(
             .with(Soldier {
                 name,
                 faction: Faction::CentralPowers,
-                rank: if i == 1 { Rank::Sergeant } else { Rank::Private },
+                rank,
+            })
+            .with(SoldierStats {
+                accuracy_modifier: stats.accuracy_modifier,
+                movement_speed_modifier: stats.movement_speed_modifier,
+                max_hp_modifier: stats.max_hp_modifier,
+                carrying_capacity: stats.carrying_capacity,
             })
             .with(TimeBudget::new(config.time_budget_seconds))
-            .with(Vision::new(10))
+            .with(Vision::new(base_stats.vision_range))
             .with(Weapon::rifle())
-            .with(Health::soldier())
+            .with(Health::new(base_stats.base_hp + stats.max_hp_modifier))
             .with(Facing::new(Direction8::E))
             .build();
     }
@@ -188,6 +220,7 @@ impl GameState {
 
         world.register::<Position>();
         world.register::<Soldier>();
+        world.register::<SoldierStats>();
         world.register::<Player>();
         world.register::<TimeBudget>();
         world.register::<QueuedAction>();
@@ -216,14 +249,9 @@ impl GameState {
         let camera = Camera::new(player_start_pos, viewport_width, viewport_height);
 
         let mut objectives = Objectives::new();
-        let allies_flag = ObjectiveFlag::new(
-            BattlefieldPos::new(player_start_pos.x - 20, player_start_pos.y + 15),
-            Faction::Allies
-        );
-        let central_flag = ObjectiveFlag::new(
-            BattlefieldPos::new(player_start_pos.x + 20, player_start_pos.y - 15),
-            Faction::CentralPowers
-        );
+        let (ally_flag_pos, enemy_flag_pos) = argue_the_toss::game_logic::objectives::create_strategic_objectives(&battlefield);
+        let allies_flag = ObjectiveFlag::new(ally_flag_pos, Faction::Allies);
+        let central_flag = ObjectiveFlag::new(enemy_flag_pos, Faction::CentralPowers);
         objectives.add_flag("allies".to_string(), allies_flag);
         objectives.add_flag("central".to_string(), central_flag);
         world.insert(objectives);
@@ -1448,17 +1476,17 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
                 } else if players.contains(entity) {
                     '@' // Player character
                 } else {
-                    soldier.faction.to_char() // Faction symbol
+                    soldier.rank.to_icon() // Rank icon
                 };
 
                 // Color based on status
                 let color = if is_dead {
                     Color::DarkGray // Dead entities are dark gray
                 } else if players.contains(entity) {
-                    Color::LightGreen // Player is bright green
+                    Color::Rgb(100, 255, 100) // Player is bright green
                 } else {
                     match soldier.faction {
-                        Faction::Allies => Color::Blue,
+                        Faction::Allies => Color::Green,
                         Faction::CentralPowers => Color::Red,
                     }
                 };
@@ -1489,8 +1517,8 @@ fn render_last_seen_markers(f: &mut Frame, area: Rect, state: &GameState) {
             let buf_y = area.y + screen_y as u16;
 
             if buf_x < area.right() && buf_y < area.bottom() {
-                // Use faction character but dimmed/ghostly
-                let ch = marker.faction.to_char();
+                // Use rank icon but dimmed/ghostly
+                let ch = marker.rank.to_icon();
 
                 // Dark gray color for ghost markers (old intel)
                 let color = Color::DarkGray;
@@ -1674,12 +1702,31 @@ fn main() -> Result<(), io::Error> {
     let mut settings_menu_state = SettingsMenuState::new();
     let mut running = true;
 
+    // CRITICAL: System execution order matters!
+    // TurnManagerSystem MUST run BEFORE ActionExecutionSystem to ensure
+    // phase transitions (Planning -> Execution) happen before actions execute.
+    // Without this ordering, the "movement bug" occurs where actions are logged
+    // but positions don't update because ActionExecutionSystem sees the old phase
+    // and returns early.
+    //
+    // Correct order:
+    // 1. PathExecutionSystem: Processes movement paths
+    // 2. AIActionPlannerSystem: AI decides actions (depends on paths)
+    // 3. TurnManagerSystem: Manages phase transitions (Planning/Execution/Resolution)
+    // 4. ActionExecutionSystem: Executes committed actions (MUST run after phase transition)
+    // 5. ObjectiveCaptureSystem: Checks for objective captures after actions execute
+    // 6. PositionValidationSystem: Debug validation to catch movement bug (no-op in release)
     let mut dispatcher = DispatcherBuilder::new()
         .with(PathExecutionSystem, "path_execution", &[])
         .with(AIActionPlannerSystem, "ai_planner", &["path_execution"])
-        .with(ActionExecutionSystem, "action_execution", &[])
+        .with(TurnManagerSystem, "turn_manager", &["ai_planner"])
+        .with(ActionExecutionSystem, "action_execution", &["turn_manager"])
         .with(ObjectiveCaptureSystem, "objective_capture", &["action_execution"])
-        .with(TurnManagerSystem, "turn_manager", &["objective_capture"])
+        .with(
+            PositionValidationSystem::new(),
+            "position_validation",
+            &["action_execution"],
+        )
         .build();
 
     while running {
@@ -1803,9 +1850,15 @@ fn main() -> Result<(), io::Error> {
                     AppState::InGame(game_state) => {
                         match key.code {
                             KeyCode::Esc => {
-                                let current_state = std::mem::replace(&mut app_state, AppState::MainMenu);
-                                if let AppState::InGame(gs) = current_state {
-                                    app_state = AppState::Paused(gs);
+                                // Only pause from Command mode, let other modes handle ESC themselves
+                                if game_state.input_mode == InputMode::Command {
+                                    let current_state = std::mem::replace(&mut app_state, AppState::MainMenu);
+                                    if let AppState::InGame(gs) = current_state {
+                                        app_state = AppState::Paused(gs);
+                                    }
+                                } else {
+                                    // Pass ESC to input handler for Look/Targeting modes
+                                    game_state.handle_input(key);
                                 }
                             }
                             _ => {

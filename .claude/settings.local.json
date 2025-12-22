@@ -21,7 +21,9 @@
       "Bash(cargo check:*)",
       "Bash(timeout 3 cargo run:*)",
       "Bash(python3:*)",
-      "Bash(rustc:*)"
+      "Bash(rustc:*)",
+      "Bash(cat:*)",
+      "Bash(pkill:*)"
     ]
   }
 }

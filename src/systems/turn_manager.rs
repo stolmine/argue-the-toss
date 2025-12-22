@@ -1,5 +1,26 @@
 // Turn Manager System
 // Manages turn flow and phase transitions
+//
+// CRITICAL SYSTEM ORDER DEPENDENCY:
+// This system MUST run BEFORE ActionExecutionSystem in the dispatcher!
+//
+// This system manages the turn state machine:
+// - Planning: Entities queue actions, AI plans, player inputs commands
+// - Execution: ActionExecutionSystem executes all committed actions
+// - Resolution: Cleanup and preparation for next turn
+//
+// Phase transitions happen by mutating TurnState.phase. Since all systems in a
+// dispatcher.dispatch() call share the same world resources, systems that run
+// AFTER this one will see the updated phase in the SAME frame.
+//
+// Execution flow (single dispatch() call):
+// 1. TurnManagerSystem (Planning) -> transitions to Execution
+// 2. ActionExecutionSystem sees Execution phase -> executes actions
+// 3. TurnManagerSystem (next frame, Execution) -> transitions to Resolution
+// 4. TurnManagerSystem (next frame, Resolution) -> clears and starts new turn
+//
+// If ActionExecutionSystem runs before this system, it will see the OLD phase
+// and fail to execute, causing the "movement bug."
 
 use crate::components::{
     action::QueuedAction, player::Player, time_budget::TimeBudget,
@@ -65,8 +86,14 @@ impl<'a> System<'a> for TurnManagerSystem {
             }
 
             TurnPhase::Execution => {
-                // Actions have been executed, transition to Resolution
-                turn_state.phase = TurnPhase::Resolution;
+                // Check if there are any committed actions left to execute
+                // If no committed actions remain, move to Resolution
+                let has_committed_actions = (&actions).join().any(|action| action.committed);
+
+                if !has_committed_actions {
+                    turn_state.phase = TurnPhase::Resolution;
+                }
+                // Otherwise, stay in Execution phase and let actions execute
             }
 
             TurnPhase::Resolution => {

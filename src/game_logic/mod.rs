@@ -7,6 +7,7 @@ pub mod line_of_sight;
 pub mod objectives;
 pub mod pathfinding;
 pub mod shared_vision;
+pub mod soldier_spawning;
 pub mod terrain_generation;
 pub mod terrain_properties;
 pub mod turn_state;

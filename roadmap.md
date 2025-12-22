@@ -1,6 +1,6 @@
 # Argue the Toss - Development Roadmap
 
-## Project Status: Phase 3 - 100% Complete, Phase 6 - 50% Complete
+## Project Status: Phase 3 - 100% Complete, Phase 5 - 60% Complete, Phase 6 - 70% Complete
 
 ### Current Phase: Phase 0 - Project Setup
 **Status:** Completed
@@ -232,32 +232,54 @@
 
 ### Phase 5: Simulation Depth
 **Target:** AI and character systems
-**Status:** Not Started
+**Status:** 60% Complete
 
-#### Planned Tasks
+#### Completed Tasks
+- [x] **AI opponents (individual soldier behavior)**
+  - [x] **Utility-based AI system with action scoring**
+  - [x] **Response curves (7 types: linear, polynomial, logistic, etc.)**
+  - [x] **Considerations system (8 evaluators: distance, ammo, health, LOS, threat, cover, objective, allies)**
+  - [x] **Action generation and scoring**
+  - [x] **AI personalities (Aggressive, Defensive, Balanced, Objective-Focused)**
+- [x] **Rank and progression system**
+  - [x] **5 WWI ranks (Captain, Lieutenant, Sergeant, Corporal, Private)**
+  - [x] **Rank-based icons (★☆●○■) with faction colors**
+  - [x] **Realistic rank distribution (70% privates, 2% captains)**
+  - [x] **Rank-specific base stats (HP, vision, accuracy, movement speed)**
+- [x] **Character stats and progression**
+  - [x] **Individual stat variation (accuracy, movement speed, HP)**
+  - [x] **Rank-based stat scaling (officers superior to privates)**
+  - [x] **Stats integrated with combat, movement, and vision systems**
+- [x] **AI allies (squad coordination)**
+  - [x] **Rank-based AI personalities (officers aggressive, privates defensive)**
+  - [x] **Officer following behavior (privates follow nearby officers)**
+  - [x] **Emergent squad cohesion through utility AI**
+
+#### Remaining Tasks
 - [ ] Morale system (individual and unit)
-- [ ] AI opponents (individual soldier behavior)
-- [ ] AI allies (squad coordination)
-- [ ] Squad formations and tactics
-- [ ] Character stats and progression
+- [ ] Squad formations and explicit tactics
 - [ ] Debuff system (wounds, shell shock, disease)
-- [ ] Rank and promotion system
+- [ ] Promotion system (rank advancement)
 - [ ] Medic units with healing abilities
 - [ ] Simulated inventories for all NPCs (weapons, ammo, items)
+- [ ] Experience system (kills, accuracy tracking)
 
 #### Success Criteria
-- AI soldiers make tactical decisions
-- Morale affects unit behavior
-- Characters gain experience and improve
-- Squad formations provide tactical benefits
-- Medics can heal wounded soldiers
-- All NPCs track and manage their own inventories
+- ✓ **AI soldiers make tactical decisions (utility-based AI)**
+- ✓ **AI behavior varies by rank (officers lead, privates follow)**
+- ✓ **Character stats affect gameplay (accuracy, HP, vision, speed)**
+- ✓ **Squad coordination emerges naturally (officer following)**
+- Morale affects unit behavior (not implemented)
+- Characters gain experience and improve (not implemented)
+- Squad formations provide tactical benefits (partial - emergent only)
+- Medics can heal wounded soldiers (not implemented)
+- All NPCs track and manage their own inventories (not implemented)
 
 ---
 
 ### Phase 6: Game Structure & Objectives
 **Target:** Mission system, game modes, and menu infrastructure
-**Status:** 50% Complete
+**Status:** 70% Complete
 
 #### Completed Tasks
 - [x] **Menu system**
@@ -267,13 +289,16 @@
   - [x] **Pause menu (in-game with ESC)**
   - [x] **Full map configuration interface**
   - [x] **Soldier count configuration (5-500 per team)**
-- [x] **Basic objective system**
+  - [x] **Look mode with proper ESC handling**
+- [x] **Objective system**
   - [x] **Flag capture mechanics (occupy for 5 turns)**
   - [x] **Two flags per map (one per faction)**
   - [x] **Visual flag rendering with faction colors**
   - [x] **Capture progress tracking**
   - [x] **Victory condition (capture all flags)**
-  - [x] **AI seeks objectives when no enemies visible**
+  - [x] **Strategic flag placement (near trenches/fortifications)**
+  - [x] **Opposite territory placement (75%+ apart)**
+  - [x] **AI actively seeks and defends objectives**
 
 #### Remaining Tasks
 - [ ] Objective system (continued)
@@ -307,6 +332,8 @@
 - ✓ **Settings are configurable (turn order, time budget, map params)**
 - ✓ **AI has tactical objectives beyond just hunting enemies**
 - ✓ **Game launches through menus, not directly into gameplay**
+- ✓ **Objectives strategically placed for tactical gameplay**
+- ✓ **AI actively pursues and defends objectives**
 - Multiple game modes available for variety (in progress)
 - After-action reports show mission results (not implemented)
 - Loss condition handling (not implemented)
@@ -316,7 +343,14 @@
 
 ### Phase 7: Scale & Polish
 **Target:** Full-scale battles and optimization
-**Status:** Not Started
+**Status:** 5% Complete
+
+#### Completed Tasks
+- [x] **Code quality improvements**
+  - [x] **Integration tests for critical systems (movement)**
+  - [x] **Runtime validation systems (position tracking)**
+  - [x] **Comprehensive code documentation**
+  - [x] **TROUBLESHOOTING.md for common issues**
 
 #### Planned Tasks
 - [ ] Multi-z-level support (full implementation)
@@ -325,6 +359,8 @@
 - [ ] Balance tuning
 - [ ] Performance profiling and optimization
 - [ ] Visual polish and clarity improvements
+  - [ ] **Background colors for terrain/units** (roadmap item)
+  - [ ] **Enhanced Unicode symbols for units** (research complete)
 - [ ] Minimap implementation
 
 #### Success Criteria
@@ -357,4 +393,42 @@ _(To be tracked as development progresses)_
 
 ---
 
-*Last updated: 2025-12-21 (evening)*
+---
+
+## Recent Major Additions (2025-12-21)
+
+### Utility-Based AI System
+- **7 response curve types** for flexible action scoring
+- **8 consideration evaluators** (distance, ammo, health, LOS, threat, cover, objective proximity, allies nearby)
+- **4 AI personalities** (Aggressive, Defensive, Balanced, Objective-Focused)
+- **Rank-based personality assignment** (officers aggressive, privates defensive)
+- **Officer following behavior** (lower ranks stay near higher ranks)
+- **Maximum score evaluation** (each action scored by multiple evaluators)
+
+### Rank & Stat System
+- **5 WWI-appropriate ranks** with unique icons
+- **Realistic distribution** (70% privates → 2% captains)
+- **Individual stat variation** (accuracy ±10%, movement ±15%, HP ±20)
+- **Rank scaling** (Captains: 140 HP, 15 vision, +0.20 accuracy vs Privates: 100 HP, 10 vision)
+- **Stats fully integrated** with combat, movement, and vision systems
+- **Faction-specific name generation** (Allied/Central Powers)
+
+### Strategic Objectives
+- **Intelligent flag placement** near trenches and fortifications
+- **Terrain-aware positioning** (scoring system: bunkers 60pts, trenches 50pts, etc.)
+- **Opposite territory placement** (flags 75%+ apart)
+- **AI objective seeking** when no enemies visible
+- **Victory conditions** (capture all enemy flags)
+
+### Code Quality
+- **Movement bug prevention** with multiple safeguards:
+  - Detailed ECS system dependency documentation
+  - Runtime position validation (debug builds)
+  - Integration tests for movement execution
+  - TROUBLESHOOTING.md guide
+- **Comprehensive comments** explaining critical system order
+- **Test coverage** for core gameplay systems
+
+---
+
+*Last updated: 2025-12-21 (late evening)*

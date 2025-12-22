@@ -22,3 +22,6 @@ pub mod utils;
 
 // Configuration
 pub mod config;
+
+// AI Systems
+pub mod ai;

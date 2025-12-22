@@ -25,6 +25,7 @@ pub struct CombatResult {
 /// - `target_pos`: Position of the target
 /// - `battlefield`: The battlefield (for LOS checks)
 /// - `shooter_vision`: Vision range of shooter (for LOS calculation)
+/// - `shooter_accuracy`: Optional accuracy modifier from soldier stats
 ///
 /// # Returns
 /// CombatResult with hit/miss, damage, and other details
@@ -34,6 +35,7 @@ pub fn calculate_shot(
     target_pos: &Position,
     battlefield: &Battlefield,
     shooter_vision: i32,
+    shooter_accuracy: Option<f32>,
 ) -> CombatResult {
     // Calculate distance to target
     let distance = calculate_distance(shooter_pos, target_pos);
@@ -70,8 +72,8 @@ pub fn calculate_shot(
         .map(|tile| tile.terrain.cover_bonus())
         .unwrap_or(0.0);
 
-    // Calculate hit chance based on range
-    let hit_chance = calculate_hit_chance(weapon, distance);
+    // Calculate hit chance based on range and shooter accuracy
+    let hit_chance = calculate_hit_chance(weapon, distance, shooter_accuracy);
 
     // Roll to hit
     let mut rng = rand::rng();
@@ -104,8 +106,10 @@ pub fn calculate_shot(
 /// - At effective_range: base_accuracy
 /// - At max_range: base_accuracy * 0.3
 /// - Beyond max_range: 0.0
-fn calculate_hit_chance(weapon: &Weapon, distance: i32) -> f32 {
-    if distance <= weapon.stats.effective_range {
+///
+/// soldier_accuracy modifier is added to the final chance (before clamping)
+fn calculate_hit_chance(weapon: &Weapon, distance: i32, soldier_accuracy: Option<f32>) -> f32 {
+    let base_chance = if distance <= weapon.stats.effective_range {
         // Within effective range: full accuracy
         weapon.stats.base_accuracy
     } else if distance <= weapon.stats.max_range {
@@ -122,7 +126,16 @@ fn calculate_hit_chance(weapon: &Weapon, distance: i32) -> f32 {
     } else {
         // Out of range
         0.0
-    }
+    };
+
+    // Apply soldier accuracy modifier
+    let modified_chance = if let Some(accuracy_mod) = soldier_accuracy {
+        base_chance + accuracy_mod
+    } else {
+        base_chance
+    };
+
+    modified_chance.clamp(0.0, 1.0)
 }
 
 /// Calculate distance between two positions (Euclidean distance, rounded up)
@@ -170,7 +183,7 @@ mod tests {
     fn test_hit_chance_within_effective_range() {
         let weapon = Weapon::rifle();
         let distance = 10; // Within effective range (15)
-        let hit_chance = calculate_hit_chance(&weapon, distance);
+        let hit_chance = calculate_hit_chance(&weapon, distance, None);
         assert_eq!(hit_chance, weapon.stats.base_accuracy);
     }
 
@@ -178,7 +191,7 @@ mod tests {
     fn test_hit_chance_beyond_effective_range() {
         let weapon = Weapon::rifle();
         let distance = 30; // At max range
-        let hit_chance = calculate_hit_chance(&weapon, distance);
+        let hit_chance = calculate_hit_chance(&weapon, distance, None);
         assert!(hit_chance < weapon.stats.base_accuracy);
         assert!(hit_chance >= weapon.stats.base_accuracy * 0.3);
     }
@@ -187,7 +200,7 @@ mod tests {
     fn test_hit_chance_out_of_range() {
         let weapon = Weapon::rifle();
         let distance = 35; // Beyond max range (30)
-        let hit_chance = calculate_hit_chance(&weapon, distance);
+        let hit_chance = calculate_hit_chance(&weapon, distance, None);
         assert_eq!(hit_chance, 0.0);
     }
 
@@ -212,7 +225,7 @@ mod tests {
 
         let mut hits = 0;
         for _ in 0..100 {
-            let result = calculate_shot(&weapon, &shooter_pos, &target_pos, &battlefield, shooter_vision);
+            let result = calculate_shot(&weapon, &shooter_pos, &target_pos, &battlefield, shooter_vision, None);
             if result.hit {
                 hits += 1;
             }

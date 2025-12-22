@@ -10,9 +10,12 @@ pub mod pathfinding;
 pub mod player;
 pub mod position;
 pub mod soldier;
+pub mod soldier_stats;
 pub mod time_budget;
 pub mod vision;
 pub mod weapon;
+
+pub use soldier_stats::SoldierStats;
 
 // Future components will be added here as submodules:
 // pub mod terrain;
