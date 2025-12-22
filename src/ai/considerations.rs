@@ -790,3 +790,31 @@ impl Consideration for RetreatNecessityConsideration {
         "RetreatNecessity"
     }
 }
+
+/// Evaluates whether enemies are visible (for aggressive seeking)
+pub struct NoEnemiesVisibleConsideration {
+    curve: ResponseCurve,
+}
+
+impl NoEnemiesVisibleConsideration {
+    pub fn new(curve: ResponseCurve) -> Self {
+        Self { curve }
+    }
+}
+
+impl Consideration for NoEnemiesVisibleConsideration {
+    fn evaluate(&self, context: &ActionContext) -> f32 {
+        // Returns 1.0 if no enemies visible, 0.0 if enemies visible
+        let no_enemies = if context.visible_enemies.is_empty() {
+            1.0
+        } else {
+            0.0
+        };
+
+        self.curve.evaluate(no_enemies)
+    }
+
+    fn name(&self) -> &str {
+        "NoEnemiesVisible"
+    }
+}

@@ -23,8 +23,8 @@ impl WeaponType {
         match self {
             WeaponType::Rifle => WeaponStats {
                 name: "Rifle".to_string(),
-                max_range: 30,        // tiles
-                effective_range: 15,  // optimal accuracy within this range
+                max_range: 30,        // Keep at 30 for gameplay
+                effective_range: 20,  // Increased from 15 for better accuracy zone
                 base_accuracy: 0.7,   // 70% hit chance at effective range
                 damage: 25,           // enough to kill in 3-4 hits
                 fire_time: 3.0,       // seconds per shot

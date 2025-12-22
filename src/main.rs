@@ -8,6 +8,7 @@ use argue_the_toss::{
         facing::{Direction8, Facing},
         health::Health,
         last_seen::LastSeenMarker,
+        muzzle_flash::MuzzleFlash,
         pathfinding::PlannedPath,
         player::Player,
         position::Position,
@@ -232,6 +233,7 @@ impl GameState {
         world.register::<Dead>();
         world.register::<Facing>();
         world.register::<LastSeenMarker>();
+        world.register::<MuzzleFlash>();
 
         let mut event_log = EventLog::new();
         event_log.add("Welcome to Argue the Toss!".to_string());
@@ -1077,6 +1079,9 @@ fn ui(f: &mut Frame, state: &GameState) {
     // Render soldiers on top
     render_soldiers(f, inner_area, state);
 
+    // Render muzzle flashes (on top of soldiers)
+    render_muzzle_flashes(f, inner_area, state);
+
     // Render cursor in Look mode or Targeting mode
     if state.input_mode == InputMode::Look {
         render_cursor(f, inner_area, state);
@@ -1499,6 +1504,34 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
     }
 }
 
+fn render_muzzle_flashes(f: &mut Frame, area: Rect, state: &GameState) {
+    let entities = state.world.entities();
+    let muzzle_flashes = state.world.read_storage::<MuzzleFlash>();
+    let top_left = state.camera.top_left();
+
+    for (_entity, flash) in (&entities, &muzzle_flashes).join() {
+        let screen_x = flash.position.x() - top_left.x;
+        let screen_y = flash.position.y() - top_left.y;
+
+        // Only render if within viewport
+        if screen_x >= 0
+            && screen_x < area.width as i32
+            && screen_y >= 0
+            && screen_y < area.height as i32
+        {
+            let buf_x = area.x + screen_x as u16;
+            let buf_y = area.y + screen_y as u16;
+
+            if buf_x < area.right() && buf_y < area.bottom() {
+                // Render muzzle flash as bright yellow '*'
+                f.buffer_mut()[(buf_x, buf_y)]
+                    .set_char('*')
+                    .set_style(Style::default().fg(Color::Rgb(255, 255, 0)));
+            }
+        }
+    }
+}
+
 fn render_last_seen_markers(f: &mut Frame, area: Rect, state: &GameState) {
     let top_left = state.camera.top_left();
 
@@ -1730,36 +1763,7 @@ fn main() -> Result<(), io::Error> {
         .build();
 
     while running {
-        terminal.draw(|f| {
-            match &mut app_state {
-                AppState::MainMenu => {
-                    let widget = MainMenuWidget::new(main_menu_state.items(), main_menu_state.selected_index());
-                    f.render_widget(widget, f.area());
-                }
-                AppState::NewGameConfig => {
-                    let widget = NewGameConfigWidget::new(&new_game_config_state);
-                    f.render_widget(widget, f.area());
-                }
-                AppState::Settings => {
-                    let widget = SettingsMenuWidget::new(&settings_menu_state);
-                    f.render_widget(widget, f.area());
-                }
-                AppState::InGame(game_state) => {
-                    game_state.update_viewport_size(f.area());
-                    ui(f, game_state);
-                }
-                AppState::Paused(game_state) => {
-                    ui(f, game_state);
-                }
-            }
-        })?;
-
-        if let AppState::InGame(game_state) = &mut app_state {
-            game_state.update_visibility();
-            dispatcher.dispatch(&game_state.world);
-            game_state.world.maintain();
-        }
-
+        // First: Handle input so systems see the latest player actions
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 match &mut app_state {
@@ -1899,6 +1903,51 @@ fn main() -> Result<(), io::Error> {
                         }
                     }
                 }
+            }
+        }
+
+        // Second: Update game state with the processed input (systems run)
+        if let AppState::InGame(game_state) = &mut app_state {
+            game_state.update_visibility();
+            dispatcher.dispatch(&game_state.world);
+            game_state.world.maintain();
+        }
+
+        // Third: Render with updated state (muzzle flashes visible)
+        terminal.draw(|f| {
+            match &mut app_state {
+                AppState::MainMenu => {
+                    let widget = MainMenuWidget::new(main_menu_state.items(), main_menu_state.selected_index());
+                    f.render_widget(widget, f.area());
+                }
+                AppState::NewGameConfig => {
+                    let widget = NewGameConfigWidget::new(&new_game_config_state);
+                    f.render_widget(widget, f.area());
+                }
+                AppState::Settings => {
+                    let widget = SettingsMenuWidget::new(&settings_menu_state);
+                    f.render_widget(widget, f.area());
+                }
+                AppState::InGame(game_state) => {
+                    game_state.update_viewport_size(f.area());
+                    ui(f, game_state);
+                }
+                AppState::Paused(game_state) => {
+                    ui(f, game_state);
+                }
+            }
+        })?;
+
+        // Fourth: Clean up muzzle flashes AFTER rendering (so they were visible this frame)
+        if let AppState::InGame(game_state) = &mut app_state {
+            let entities = game_state.world.entities();
+            let mut muzzle_flashes = game_state.world.write_storage::<MuzzleFlash>();
+            let to_remove: Vec<_> = (&entities, &muzzle_flashes)
+                .join()
+                .map(|(entity, _)| entity)
+                .collect();
+            for entity in to_remove {
+                muzzle_flashes.remove(entity);
             }
         }
     }

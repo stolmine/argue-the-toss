@@ -102,11 +102,11 @@ impl Rank {
 
     pub fn to_icon(&self) -> char {
         match self {
-            Rank::Captain => '★',
-            Rank::Lieutenant => '☆',
-            Rank::Sergeant => '●',
-            Rank::Corporal => '○',
-            Rank::Private => '■',
+            Rank::Captain => '♔',      // Crown - most decorative for highest rank
+            Rank::Lieutenant => '▲',   // Filled triangle - distinctive officer icon
+            Rank::Sergeant => '◆',     // Filled diamond - NCO leadership
+            Rank::Corporal => '■',     // Filled square - junior NCO
+            Rank::Private => '●',      // Filled dot - simple for lowest rank
         }
     }
 

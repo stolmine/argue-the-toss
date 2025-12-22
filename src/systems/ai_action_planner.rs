@@ -173,16 +173,8 @@ impl AIActionPlannerSystem {
             )
             .ok();
 
-        if cfg!(debug_assertions) {
-            if let Some(name) = soldier_name {
-                event_log.add(format!(
-                    "AI {}: {:?} (score: {:.2})",
-                    name,
-                    action.action_type,
-                    action.score
-                ));
-            }
-        }
+        // AI action selection logging removed from event log (clutters UI)
+        // This information is available in debug logs at /tmp/argue_ai_debug.log
     }
 
     fn queue_move_action(
@@ -370,17 +362,9 @@ impl<'a> System<'a> for AIActionPlannerSystem {
 
             total_actions_evaluated += scored_actions.len();
 
+            // AI action consideration logging removed from event log (clutters UI)
             if cfg!(debug_assertions) && !scored_actions.is_empty() {
                 let shoot_count = scored_actions.iter().filter(|a| matches!(a.action_type, ActionType::Shoot { .. })).count();
-
-                event_log.add(format!(
-                    "{} considering {} actions (enemies: {}, shoot: {})",
-                    soldier.name,
-                    scored_actions.len(),
-                    visible_enemies.len(),
-                    shoot_count
-                ));
-
                 debug_log(&format!("[AI] {} has {} shoot actions out of {} total", soldier.name, shoot_count, scored_actions.len()));
             }
 

@@ -6,6 +6,7 @@ use crate::ai::{
         ObjectiveProximityConsideration, ThreatLevelConsideration,
         ExposedDangerConsideration, TacticalAdvantageConsideration, ForceBalanceConsideration,
         SupportProximityConsideration, ObjectivePressureConsideration, RetreatNecessityConsideration,
+        NoEnemiesVisibleConsideration,
     },
     response_curves::ResponseCurve,
 };
@@ -103,12 +104,12 @@ impl AIPersonality {
 }
 
 fn create_balanced_shoot_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Shoot", 0.9)
+    ActionEvaluator::new("Shoot", 1.0)  // Increased from 0.9
         .with_consideration(Box::new(HasLineOfSightConsideration::new(
             ResponseCurve::Boolean { threshold: 0.5 },
         )))
         .with_consideration(Box::new(DistanceToTargetConsideration::new(
-            ResponseCurve::Inverse,
+            ResponseCurve::Linear,
         )))
         .with_consideration(Box::new(AmmoLevelConsideration::new(
             ResponseCurve::Linear,
@@ -116,7 +117,9 @@ fn create_balanced_shoot_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(ThreatLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Average)
+        .with_combiner(ScoreCombiner::WeightedAverage {
+            base_weight: 2.5
+        })
 }
 
 fn create_balanced_reload_evaluator() -> ActionEvaluator {
@@ -131,7 +134,7 @@ fn create_balanced_reload_evaluator() -> ActionEvaluator {
 }
 
 fn create_balanced_move_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Move", 0.5)
+    ActionEvaluator::new("Move", 0.4)  // Reduced from 0.5
         .with_consideration(Box::new(ExposedDangerConsideration::new(
             ResponseCurve::Linear,
         )))
@@ -168,12 +171,15 @@ fn create_balanced_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_balanced_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.4)
+    ActionEvaluator::new("SeekObjective", 0.65)  // Increased from 0.4
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Inverse,
         )))
         .with_consideration(Box::new(AlliesNearbyConsideration::new(
             ResponseCurve::Linear,
+        )))
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Linear,  // Boost when no enemies visible
         )))
         .with_combiner(ScoreCombiner::Average)
 }
@@ -183,11 +189,14 @@ fn create_balanced_wait_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(AmmoLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Minimum)
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Inverse,  // Penalize waiting when no enemies (inverse = low score when no enemies)
+        )))
+        .with_combiner(ScoreCombiner::Average)
 }
 
 fn create_aggressive_shoot_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Shoot", 1.0)  // Highest priority for aggressive
+    ActionEvaluator::new("Shoot", 1.2)  // Increased from 1.0
         .with_consideration(Box::new(HasLineOfSightConsideration::new(
             ResponseCurve::Boolean { threshold: 0.5 },
         )))
@@ -200,7 +209,9 @@ fn create_aggressive_shoot_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(ThreatLevelConsideration::new(
             ResponseCurve::Polynomial { exponent: 2.0 },
         )))
-        .with_combiner(ScoreCombiner::Average)
+        .with_combiner(ScoreCombiner::WeightedAverage {
+            base_weight: 3.0  // Give base score 3x weight vs considerations
+        })
 }
 
 fn create_aggressive_reload_evaluator() -> ActionEvaluator {
@@ -215,7 +226,7 @@ fn create_aggressive_reload_evaluator() -> ActionEvaluator {
 }
 
 fn create_aggressive_move_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Move", 0.4)  // Lower base - aggression prioritizes shooting
+    ActionEvaluator::new("Move", 0.3)  // Reduced from 0.4
         .with_consideration(Box::new(ExposedDangerConsideration::new(
             ResponseCurve::Linear,  // Less concerned with danger
         )))
@@ -252,12 +263,15 @@ fn create_aggressive_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_aggressive_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.3)
+    ActionEvaluator::new("SeekObjective", 0.6)  // Increased from 0.3
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Inverse,
         )))
         .with_consideration(Box::new(AlliesNearbyConsideration::new(
             ResponseCurve::Linear,
+        )))
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Polynomial { exponent: 2.0 },  // Strong boost for aggressive
         )))
         .with_combiner(ScoreCombiner::Average)
 }
@@ -267,11 +281,14 @@ fn create_aggressive_wait_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(AmmoLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Minimum)
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Inverse,  // Penalize waiting when no enemies
+        )))
+        .with_combiner(ScoreCombiner::Average)
 }
 
 fn create_defensive_shoot_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Shoot", 0.7)  // Lower priority for defensive
+    ActionEvaluator::new("Shoot", 0.85)  // Increased from 0.7
         .with_consideration(Box::new(HasLineOfSightConsideration::new(
             ResponseCurve::Boolean { threshold: 0.5 },
         )))
@@ -287,7 +304,9 @@ fn create_defensive_shoot_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(CoverQualityConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Average)
+        .with_combiner(ScoreCombiner::WeightedAverage {
+            base_weight: 2.0
+        })
 }
 
 fn create_defensive_reload_evaluator() -> ActionEvaluator {
@@ -302,7 +321,7 @@ fn create_defensive_reload_evaluator() -> ActionEvaluator {
 }
 
 fn create_defensive_move_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Move", 0.6)  // Higher base - defensive prefers repositioning
+    ActionEvaluator::new("Move", 0.5)  // Reduced from 0.6
         .with_consideration(Box::new(ExposedDangerConsideration::new(
             ResponseCurve::Polynomial { exponent: 2.0 },  // Very concerned with danger
         )))
@@ -339,12 +358,15 @@ fn create_defensive_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_defensive_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.3)
+    ActionEvaluator::new("SeekObjective", 0.5)  // Increased from 0.3
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Inverse,
         )))
         .with_consideration(Box::new(AlliesNearbyConsideration::new(
             ResponseCurve::Linear,
+        )))
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Linear,  // Moderate boost for defensive
         )))
         .with_combiner(ScoreCombiner::Average)
 }
@@ -354,11 +376,14 @@ fn create_defensive_wait_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(AmmoLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Minimum)
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Inverse,  // Penalize waiting when no enemies
+        )))
+        .with_combiner(ScoreCombiner::Average)
 }
 
 fn create_objective_shoot_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Shoot", 0.6)  // Moderate - objectives more important
+    ActionEvaluator::new("Shoot", 0.9)  // Increased from 0.6
         .with_consideration(Box::new(HasLineOfSightConsideration::new(
             ResponseCurve::Boolean { threshold: 0.5 },
         )))
@@ -371,7 +396,9 @@ fn create_objective_shoot_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(ThreatLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Average)
+        .with_combiner(ScoreCombiner::WeightedAverage {
+            base_weight: 2.5
+        })
 }
 
 fn create_objective_reload_evaluator() -> ActionEvaluator {
@@ -386,7 +413,7 @@ fn create_objective_reload_evaluator() -> ActionEvaluator {
 }
 
 fn create_objective_move_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Move", 0.5)
+    ActionEvaluator::new("Move", 0.4)  // Reduced from 0.5
         .with_consideration(Box::new(ExposedDangerConsideration::new(
             ResponseCurve::Linear,
         )))
@@ -430,6 +457,9 @@ fn create_objective_seek_objective_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(AlliesNearbyConsideration::new(
             ResponseCurve::Polynomial { exponent: 2.0 },
         )))
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Polynomial { exponent: 2.0 },  // Strong boost
+        )))
         .with_combiner(ScoreCombiner::Average)
 }
 
@@ -438,11 +468,14 @@ fn create_objective_wait_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(AmmoLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Minimum)
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Inverse,  // Penalize waiting when no enemies
+        )))
+        .with_combiner(ScoreCombiner::Average)
 }
 
 fn create_scout_shoot_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Shoot", 0.5)
+    ActionEvaluator::new("Shoot", 0.7)  // Increased from 0.5
         .with_consideration(Box::new(HasLineOfSightConsideration::new(
             ResponseCurve::Boolean { threshold: 0.5 },
         )))
@@ -455,7 +488,9 @@ fn create_scout_shoot_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(ThreatLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Average)
+        .with_combiner(ScoreCombiner::WeightedAverage {
+            base_weight: 1.5
+        })
 }
 
 fn create_scout_reload_evaluator() -> ActionEvaluator {
@@ -470,7 +505,7 @@ fn create_scout_reload_evaluator() -> ActionEvaluator {
 }
 
 fn create_scout_move_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Move", 0.8)
+    ActionEvaluator::new("Move", 0.7)  // Reduced from 0.8
         .with_consideration(Box::new(ExposedDangerConsideration::new(
             ResponseCurve::Inverse,
         )))
@@ -514,6 +549,9 @@ fn create_scout_seek_objective_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(AlliesNearbyConsideration::new(
             ResponseCurve::Inverse,
         )))
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Polynomial { exponent: 2.0 },  // Strong boost - scouts explore
+        )))
         .with_combiner(ScoreCombiner::Average)
 }
 
@@ -522,11 +560,14 @@ fn create_scout_wait_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(AmmoLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Minimum)
+        .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
+            ResponseCurve::Inverse,  // Penalize waiting when no enemies
+        )))
+        .with_combiner(ScoreCombiner::Average)
 }
 
 fn create_rearguard_shoot_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Shoot", 0.6)
+    ActionEvaluator::new("Shoot", 0.9)  // Increased from 0.6
         .with_consideration(Box::new(HasLineOfSightConsideration::new(
             ResponseCurve::Boolean { threshold: 0.5 },
         )))
@@ -539,7 +580,9 @@ fn create_rearguard_shoot_evaluator() -> ActionEvaluator {
         .with_consideration(Box::new(ThreatLevelConsideration::new(
             ResponseCurve::Linear,
         )))
-        .with_combiner(ScoreCombiner::Average)
+        .with_combiner(ScoreCombiner::WeightedAverage {
+            base_weight: 2.0
+        })
 }
 
 fn create_rearguard_reload_evaluator() -> ActionEvaluator {
@@ -554,7 +597,7 @@ fn create_rearguard_reload_evaluator() -> ActionEvaluator {
 }
 
 fn create_rearguard_move_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("Move", 0.3)
+    ActionEvaluator::new("Move", 0.25)  // Reduced from 0.3
         .with_consideration(Box::new(ExposedDangerConsideration::new(
             ResponseCurve::Polynomial { exponent: 2.0 },
         )))
@@ -591,7 +634,7 @@ fn create_rearguard_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_rearguard_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.7)
+    ActionEvaluator::new("SeekObjective", 0.75)  // Increased from 0.7
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Linear,
         )))

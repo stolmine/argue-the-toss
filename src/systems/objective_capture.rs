@@ -84,13 +84,15 @@ impl<'a> System<'a> for ObjectiveCaptureSystem {
 
         if check_victory {
             if let Some(victor) = objectives.check_victory() {
-                event_log.add(format!(
-                    "VICTORY! {} have captured all objectives!",
-                    match victor {
-                        crate::components::soldier::Faction::Allies => "Allies",
-                        crate::components::soldier::Faction::CentralPowers => "Central Powers",
-                    }
-                ));
+                let victor_name = match victor {
+                    crate::components::soldier::Faction::Allies => "Allies",
+                    crate::components::soldier::Faction::CentralPowers => "Central Powers",
+                };
+
+                // ALWAYS log victory messages (critical game state information)
+                event_log.add("==========================================".to_string());
+                event_log.add(format!("VICTORY! {} have captured all objectives!", victor_name));
+                event_log.add("==========================================".to_string());
             }
         }
     }

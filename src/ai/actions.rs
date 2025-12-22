@@ -50,6 +50,7 @@ impl ScoredAction {
 pub enum ScoreCombiner {
     Multiplicative,
     Average,
+    WeightedAverage { base_weight: f32 },
     WeightedSum { weights: Vec<f32> },
     Minimum,
 }
@@ -68,6 +69,17 @@ impl ScoreCombiner {
             ScoreCombiner::Average => {
                 let sum: f32 = consideration_scores.iter().sum();
                 (base_score + sum) / (1.0 + consideration_scores.len() as f32)
+            }
+
+            ScoreCombiner::WeightedAverage { base_weight } => {
+                if consideration_scores.is_empty() {
+                    base_score
+                } else {
+                    let sum: f32 = consideration_scores.iter().sum();
+                    let avg = sum / consideration_scores.len() as f32;
+                    let total_weight = base_weight + 1.0;
+                    (base_score * base_weight + avg) / total_weight
+                }
             }
 
             ScoreCombiner::WeightedSum { weights } => {

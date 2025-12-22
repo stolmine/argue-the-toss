@@ -98,7 +98,7 @@
 - **Time Scale:** Tiles = ~2m, movement 1.5s, rotation 0.3s, turn budget 12s
 - **Last-Seen Markers:** Ghost markers at enemy last known positions (10 turn expiry)
 - **Shared Vision:** Players see combined allied FOV with spotter attribution
-- **Combat:** Hitscan weapons, 70% base accuracy, ammo/reload mechanics
+- **Combat:** Hitscan weapons, 70% base accuracy, accuracy falloff with range (full accuracy to effective_range, degrades to 30% at max_range), cover-based damage reduction, ammo/reload mechanics
 
 #### Success Criteria
 - ✓ Viewport adapts to terminal size
@@ -215,6 +215,7 @@
 **Status:** Not Started
 
 #### Planned Tasks
+- [ ] **Damage falloff with range** (accuracy falloff already implemented)
 - [ ] Physics-based projectiles (mortars, grenades)
 - [ ] Artillery system (off-map support)
 - [ ] Smoke effects

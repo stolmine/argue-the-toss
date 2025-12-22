@@ -23,6 +23,8 @@ use crate::components::{
     dead::Dead,
     facing::Facing,
     health::Health,
+    muzzle_flash::MuzzleFlash,
+    player::Player,
     position::Position,
     soldier::Soldier,
     soldier_stats::SoldierStats,
@@ -31,6 +33,7 @@ use crate::components::{
 };
 use crate::game_logic::battlefield::Battlefield;
 use crate::game_logic::combat::{apply_damage, calculate_shot};
+use crate::game_logic::line_of_sight::calculate_fov;
 use crate::game_logic::turn_state::{TurnPhase, TurnState};
 use crate::utils::event_log::EventLog;
 use specs::{Entities, Join, Read, ReadStorage, System, Write, WriteStorage};
@@ -50,6 +53,8 @@ impl<'a> System<'a> for ActionExecutionSystem {
         ReadStorage<'a, Vision>,
         ReadStorage<'a, Soldier>,
         ReadStorage<'a, SoldierStats>,
+        ReadStorage<'a, Player>,
+        WriteStorage<'a, MuzzleFlash>,
         Write<'a, EventLog>,
         Read<'a, TurnState>,
         Read<'a, Battlefield>,
@@ -69,6 +74,8 @@ impl<'a> System<'a> for ActionExecutionSystem {
             visions,
             soldiers,
             soldier_stats,
+            players,
+            mut muzzle_flashes,
             mut log,
             turn_state,
             battlefield,
@@ -96,26 +103,39 @@ impl<'a> System<'a> for ActionExecutionSystem {
                     dy,
                     terrain_cost: _,
                 } => {
-                    if let Some(pos) = positions.get_mut(entity) {
+                    if let Some(pos) = positions.get(entity) {
                         let old_x = pos.x();
                         let old_y = pos.y();
                         let new_x = old_x + dx;
                         let new_y = old_y + dy;
-                        // Boundary check (from battlefield size)
+
+                        // Boundary check
                         if new_x >= 0 && new_x < 100 && new_y >= 0 && new_y < 100 {
-                            *pos = Position::new(new_x, new_y);
-                            if let Some(soldier) = soldiers.get(entity) {
-                                log.add(format!("{} moved from ({}, {}) to ({}, {})",
-                                    soldier.name, old_x, old_y, new_x, new_y));
+                            let new_pos = Position::new(new_x, new_y);
+
+                            // Collision check: ensure no other entity occupies target tile
+                            let tile_occupied = (&entities, &positions, !&dead_markers)
+                                .join()
+                                .any(|(other_entity, other_pos, _)| {
+                                    other_entity != entity && *other_pos == new_pos
+                                });
+
+                            if !tile_occupied {
+                                // Now get mutable access to update position
+                                if let Some(pos_mut) = positions.get_mut(entity) {
+                                    *pos_mut = new_pos;
+                                }
+                                // Movement logging removed from event log (clutters UI)
+                                // Movement can still be tracked via debug logs if needed
                             } else {
-                                log.add(format!("Entity moved from ({}, {}) to ({}, {})",
-                                    old_x, old_y, new_x, new_y));
+                                // Move blocked by another unit - silent
+                                // Optional: add debug log if needed for troubleshooting
                             }
                         } else {
-                            log.add(format!("Move blocked: ({}, {}) out of bounds", new_x, new_y));
+                            // Move blocked - out of bounds
                         }
                     } else {
-                        log.add("Move failed: entity has no position component".to_string());
+                        // Move failed - no position component
                     }
                 }
                 ActionType::Rotate { clockwise } => {
@@ -126,11 +146,7 @@ impl<'a> System<'a> for ActionExecutionSystem {
                         } else {
                             facing.rotate_ccw();
                         }
-
-                        if let Some(soldier) = soldiers.get(entity) {
-                            log.add(format!("{} rotates {}.", soldier.name,
-                                if *clockwise { "clockwise" } else { "counter-clockwise" }));
-                        }
+                        // Rotation logging removed from event log (clutters UI)
                     }
                 }
                 ActionType::Wait => {
@@ -150,6 +166,9 @@ impl<'a> System<'a> for ActionExecutionSystem {
                         &soldier_stats,
                         &mut log,
                         &battlefield,
+                        &mut muzzle_flashes,
+                        &players,
+                        &entities,
                     );
                 }
                 ActionType::Reload => {
@@ -200,6 +219,9 @@ fn execute_shoot(
     soldier_stats: &ReadStorage<SoldierStats>,
     log: &mut EventLog,
     battlefield: &Battlefield,
+    muzzle_flashes: &mut WriteStorage<MuzzleFlash>,
+    players: &ReadStorage<Player>,
+    entities: &Entities,
 ) {
     // Get shooter's weapon
     let shooter_weapon = match weapons.get_mut(shooter) {
@@ -234,6 +256,36 @@ fn execute_shoot(
         }
     };
 
+    // Check if this event should be logged (visible to player)
+    let should_log = {
+        let mut visible_to_player = false;
+
+        // Find player and check if shooter or target is in their FOV
+        for (player_entity, _player) in (entities, players).join() {
+            if let Some(player_pos) = positions.get(player_entity) {
+                if let Some(player_vision) = visions.get(player_entity) {
+                    let player_fov = calculate_fov(
+                        &player_pos.as_battlefield_pos(),
+                        player_vision.range,
+                        battlefield,
+                    );
+
+                    // Check if shooter or target position is in player's FOV
+                    if player_fov.contains(&shooter_pos.as_battlefield_pos()) {
+                        visible_to_player = true;
+                        break;
+                    }
+                    if player_fov.contains(&target_pos.as_battlefield_pos()) {
+                        visible_to_player = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        visible_to_player
+    };
+
     // Get shooter vision for LOS check
     let shooter_vision = visions.get(shooter).map(|v| v.range).unwrap_or(10);
 
@@ -253,6 +305,26 @@ fn execute_shoot(
     // Consume ammo
     shooter_weapon.fire();
 
+    // Create muzzle flash effect in direction of target
+    if let (Some(shooter_pos), Some(target_pos)) = (positions.get(shooter), positions.get(target)) {
+        // Calculate direction vector from shooter to target
+        let dx = target_pos.x() - shooter_pos.x();
+        let dy = target_pos.y() - shooter_pos.y();
+        let distance = ((dx * dx + dy * dy) as f32).sqrt();
+
+        if distance > 0.1 {
+            // Normalize and offset by 1 tile in direction of shot
+            let norm_dx = (dx as f32 / distance).round() as i32;
+            let norm_dy = (dy as f32 / distance).round() as i32;
+
+            let flash_x = shooter_pos.x() + norm_dx;
+            let flash_y = shooter_pos.y() + norm_dy;
+            let flash_pos = Position::new(flash_x, flash_y);
+
+            muzzle_flashes.insert(shooter, MuzzleFlash::new(flash_pos)).ok();
+        }
+    }
+
     // Get names for logging
     let shooter_name = soldiers
         .get(shooter)
@@ -265,20 +337,25 @@ fn execute_shoot(
 
     // Handle result
     if result.blocked_by_los {
-        log.add(format!(
-            "{} shoots at {} but has no line of sight!",
-            shooter_name, target_name
-        ));
+        if should_log {
+            log.add(format!(
+                "{} shoots at {} but has no line of sight!",
+                shooter_name, target_name
+            ));
+        }
     } else if result.hit {
         // Apply damage to target
         if let Some(target_health) = healths.get_mut(target) {
             let still_alive = apply_damage(target_health, result.damage);
             if still_alive {
-                log.add(format!(
-                    "{} shoots {} for {} damage! ({} HP remaining)",
-                    shooter_name, target_name, result.damage, target_health.current
-                ));
+                if should_log {
+                    log.add(format!(
+                        "{} shoots {} for {} damage! ({} HP remaining)",
+                        shooter_name, target_name, result.damage, target_health.current
+                    ));
+                }
             } else {
+                // ALWAYS log kills, regardless of FOV (important information)
                 log.add(format!(
                     "{} shoots {} for {} damage! {} is killed!",
                     shooter_name, target_name, result.damage, target_name
@@ -287,15 +364,19 @@ fn execute_shoot(
                 dead_markers.insert(target, Dead).ok();
             }
         } else {
-            log.add(format!("{} shoots {} and hits!", shooter_name, target_name));
+            if should_log {
+                log.add(format!("{} shoots {} and hits!", shooter_name, target_name));
+            }
         }
     } else {
-        log.add(format!(
-            "{} shoots at {} and misses! ({}% chance, {} tiles)",
-            shooter_name,
-            target_name,
-            (result.hit_chance * 100.0) as i32,
-            result.distance
-        ));
+        if should_log {
+            log.add(format!(
+                "{} shoots at {} and misses! ({}% chance, {} tiles)",
+                shooter_name,
+                target_name,
+                (result.hit_chance * 100.0) as i32,
+                result.distance
+            ));
+        }
     }
 }

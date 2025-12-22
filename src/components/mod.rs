@@ -6,6 +6,7 @@ pub mod dead;
 pub mod facing;
 pub mod health;
 pub mod last_seen;
+pub mod muzzle_flash;
 pub mod pathfinding;
 pub mod player;
 pub mod position;
@@ -15,6 +16,7 @@ pub mod time_budget;
 pub mod vision;
 pub mod weapon;
 
+pub use muzzle_flash::MuzzleFlash;
 pub use soldier_stats::SoldierStats;
 
 // Future components will be added here as submodules:
