@@ -1,6 +1,6 @@
 # Argue the Toss - Development Roadmap
 
-## Project Status: Phase 2 - 95% Complete
+## Project Status: Phase 3 - 100% Complete, Phase 6 - 50% Complete
 
 ### Current Phase: Phase 0 - Project Setup
 **Status:** Completed
@@ -139,7 +139,7 @@
 
 ### Phase 3: Environmental Systems
 **Target:** Procedural battlefield generation, terrain types, and weather mechanics
-**Status:** 65% Complete
+**Status:** 100% Complete
 
 #### Completed Tasks
 - [x] Procedural battlefield generation system
@@ -148,6 +148,8 @@
   - [x] Vegetation distribution (forests, hedgerows, individual trees)
   - [x] No-man's-land generation (shell craters, wire, debris)
   - [x] Spawn point placement logic (faction-specific starting positions)
+  - [x] **Proper spawn zones with faction separation (75+ tiles apart)**
+  - [x] **Dynamic spawn radius scaling with map size**
 - [x] Barbed wire obstacles (movement impediment, vision blocking)
   - Note: **Needs tuning - barbed wire density too high**
 - [x] Static emplacements
@@ -160,8 +162,10 @@
 - [x] Buildings (multi-tile structures spanning multiple positions)
 - [x] Movement cost based on terrain
 - [x] Cover mechanics and calculations
+- [x] **Full map configuration UI with all terrain parameters**
+- [x] **Custom preset system with manual parameter override**
 
-#### Remaining Tasks
+#### Remaining Tasks (Deferred to Phase 7)
 - [ ] Static emplacements (continued)
   - [ ] Mortar pits
   - [ ] Artillery positions
@@ -185,19 +189,24 @@
 - **Cover Bonus Integration:** Terrain provides combat bonuses (trenches, sandbags, buildings)
 - **Configurable Parameters:** Seed, density levels, coverage percentages, side placement
 
-#### Success Criteria
+#### Success Criteria - All Core Criteria Met ✓
 - ✓ Procedural generation creates realistic WWI battlefields
 - ✓ Trench networks have logical layout (front/support/communication trenches)
 - ✓ Towns and vegetation placed with strategic considerations
 - ✓ Spawn points positioned appropriately for each faction
+- ✓ **Factions spawn at proper distance (75+ tiles apart)**
+- ✓ **Spawn zones avoid water and impassable terrain**
+- ✓ **Spawn distribution handles up to 500 soldiers per faction**
 - ✓ Barbed wire creates tactical obstacles
 - ✓ Static emplacements provide defensive positions
 - ✓ Different terrain affects movement speed
 - ✓ All terrain types have distinct colors and characters
 - ✓ Buildings render as multi-tile structures
 - ✓ Cover provides combat bonuses
-- Weather affects visibility (not implemented)
-- Lighting changes visibility ranges (not implemented)
+- ✓ **All map parameters configurable in UI**
+- ✓ **Custom preset for manual configuration**
+- Weather affects visibility (deferred to Phase 7)
+- Lighting changes visibility ranges (deferred to Phase 7)
 
 ---
 
@@ -248,29 +257,41 @@
 
 ### Phase 6: Game Structure & Objectives
 **Target:** Mission system, game modes, and menu infrastructure
-**Status:** Not Started
+**Status:** 50% Complete
 
-#### Planned Tasks
-- [ ] Objective system
-  - [ ] Capture point objectives (hold position for X turns)
+#### Completed Tasks
+- [x] **Menu system**
+  - [x] **Main menu (New Game, Load Game placeholder, Settings, Quit)**
+  - [x] **New game configuration menu with presets**
+  - [x] **Settings menu (turn order, time budget)**
+  - [x] **Pause menu (in-game with ESC)**
+  - [x] **Full map configuration interface**
+  - [x] **Soldier count configuration (5-500 per team)**
+- [x] **Basic objective system**
+  - [x] **Flag capture mechanics (occupy for 5 turns)**
+  - [x] **Two flags per map (one per faction)**
+  - [x] **Visual flag rendering with faction colors**
+  - [x] **Capture progress tracking**
+  - [x] **Victory condition (capture all flags)**
+  - [x] **AI seeks objectives when no enemies visible**
+
+#### Remaining Tasks
+- [ ] Objective system (continued)
   - [ ] Elimination objectives (kill all enemies, kill specific target)
   - [ ] Survival objectives (last X turns, protect unit)
   - [ ] Escort objectives (move unit to extraction point)
   - [ ] Intel objectives (reach location, investigate area)
 - [ ] Game modes
-  - [ ] Skirmish mode (single battle, customizable settings)
+  - [ ] Skirmish mode (single battle, customizable settings) - partially complete
   - [ ] Mission mode (objective-based scenarios)
   - [ ] Survival mode (endless waves, high score)
   - [ ] Historical scenarios (predefined WWI battles)
   - [ ] Custom mode (player-defined rules and victory conditions)
-- [ ] Menu system
-  - [ ] Main menu (New Game, Continue, Settings, Quit)
-  - [ ] Settings menu (controls, time scale, difficulty, FOW options)
+- [ ] Menu system (continued)
+  - [ ] Load/Save game functionality
   - [ ] Mission select screen
   - [ ] After-action report (statistics, performance, casualties)
-  - [ ] Pause menu (in-game)
-- [ ] Victory/defeat conditions
-  - [ ] Win condition detection and handling
+- [ ] Victory/defeat conditions (continued)
   - [ ] Loss condition detection and handling
   - [ ] Mission success/failure screens
   - [ ] Performance ratings (optional)
@@ -280,13 +301,16 @@
   - [ ] Unlockable scenarios or units
 
 #### Success Criteria
-- Players have clear objectives to complete
-- Multiple game modes available for variety
-- Full menu system for navigation and settings
-- Victory/defeat properly detected and displayed
-- After-action reports show mission results
-- Settings are persistent and configurable
-- Game feels like a complete product, not a sandbox
+- ✓ **Players have clear objectives to complete (flag capture)**
+- ✓ **Basic victory condition implemented and detected**
+- ✓ **Full menu system for navigation and settings**
+- ✓ **Settings are configurable (turn order, time budget, map params)**
+- ✓ **AI has tactical objectives beyond just hunting enemies**
+- ✓ **Game launches through menus, not directly into gameplay**
+- Multiple game modes available for variety (in progress)
+- After-action reports show mission results (not implemented)
+- Loss condition handling (not implemented)
+- Meta-progression system (not implemented)
 
 ---
 
@@ -333,4 +357,4 @@ _(To be tracked as development progresses)_
 
 ---
 
-*Last updated: 2025-12-21*
+*Last updated: 2025-12-21 (evening)*
