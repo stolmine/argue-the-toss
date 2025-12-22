@@ -246,7 +246,51 @@
 
 ---
 
-### Phase 6: Scale & Polish
+### Phase 6: Game Structure & Objectives
+**Target:** Mission system, game modes, and menu infrastructure
+**Status:** Not Started
+
+#### Planned Tasks
+- [ ] Objective system
+  - [ ] Capture point objectives (hold position for X turns)
+  - [ ] Elimination objectives (kill all enemies, kill specific target)
+  - [ ] Survival objectives (last X turns, protect unit)
+  - [ ] Escort objectives (move unit to extraction point)
+  - [ ] Intel objectives (reach location, investigate area)
+- [ ] Game modes
+  - [ ] Skirmish mode (single battle, customizable settings)
+  - [ ] Mission mode (objective-based scenarios)
+  - [ ] Survival mode (endless waves, high score)
+  - [ ] Historical scenarios (predefined WWI battles)
+  - [ ] Custom mode (player-defined rules and victory conditions)
+- [ ] Menu system
+  - [ ] Main menu (New Game, Continue, Settings, Quit)
+  - [ ] Settings menu (controls, time scale, difficulty, FOW options)
+  - [ ] Mission select screen
+  - [ ] After-action report (statistics, performance, casualties)
+  - [ ] Pause menu (in-game)
+- [ ] Victory/defeat conditions
+  - [ ] Win condition detection and handling
+  - [ ] Loss condition detection and handling
+  - [ ] Mission success/failure screens
+  - [ ] Performance ratings (optional)
+- [ ] Meta-progression (optional)
+  - [ ] Persistent soldier roster across missions
+  - [ ] Campaign structure linking missions
+  - [ ] Unlockable scenarios or units
+
+#### Success Criteria
+- Players have clear objectives to complete
+- Multiple game modes available for variety
+- Full menu system for navigation and settings
+- Victory/defeat properly detected and displayed
+- After-action reports show mission results
+- Settings are persistent and configurable
+- Game feels like a complete product, not a sandbox
+
+---
+
+### Phase 7: Scale & Polish
 **Target:** Full-scale battles and optimization
 **Status:** Not Started
 
