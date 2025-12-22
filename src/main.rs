@@ -1483,10 +1483,10 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
                 let color = if is_dead {
                     Color::DarkGray // Dead entities are dark gray
                 } else if players.contains(entity) {
-                    Color::Rgb(100, 255, 100) // Player is bright green
+                    Color::Rgb(0, 255, 255) // Player is bright cyan (unique color)
                 } else {
                     match soldier.faction {
-                        Faction::Allies => Color::Green,
+                        Faction::Allies => Color::Blue,
                         Faction::CentralPowers => Color::Red,
                     }
                 };

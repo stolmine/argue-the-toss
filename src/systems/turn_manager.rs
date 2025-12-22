@@ -23,7 +23,7 @@
 // and fail to execute, causing the "movement bug."
 
 use crate::components::{
-    action::QueuedAction, player::Player, time_budget::TimeBudget,
+    action::QueuedAction, dead::Dead, player::Player, time_budget::TimeBudget,
 };
 use crate::game_logic::turn_state::{TurnOrderMode, TurnPhase, TurnState};
 use crate::utils::event_log::EventLog;
@@ -38,12 +38,13 @@ impl<'a> System<'a> for TurnManagerSystem {
         WriteStorage<'a, TimeBudget>,
         WriteStorage<'a, QueuedAction>,
         ReadStorage<'a, Player>,
+        ReadStorage<'a, Dead>,
         Write<'a, EventLog>,
     );
 
     fn run(
         &mut self,
-        (entities, mut turn_state, mut budgets, mut actions, players, mut log): Self::SystemData,
+        (entities, mut turn_state, mut budgets, mut actions, players, dead_markers, mut log): Self::SystemData,
     ) {
         match turn_state.phase {
             TurnPhase::Planning => {
@@ -63,15 +64,19 @@ impl<'a> System<'a> for TurnManagerSystem {
                         (&entities, &budgets)
                             .join()
                             .filter(|(e, _)| players.get(*e).is_none()) // NPCs only
+                            .filter(|(e, _)| dead_markers.get(*e).is_none()) // Exclude dead
                             .all(|(e, budget)| {
                                 actions.get(e).is_some() || budget.available_time() <= 0.0
                             })
                     }
                     TurnOrderMode::Simultaneous => {
                         // All entities must be ready
-                        (&entities, &budgets).join().all(|(e, budget)| {
-                            turn_state.is_entity_ready(e) || budget.available_time() <= 0.0
-                        })
+                        (&entities, &budgets)
+                            .join()
+                            .filter(|(e, _)| dead_markers.get(*e).is_none()) // Exclude dead
+                            .all(|(e, budget)| {
+                                turn_state.is_entity_ready(e) || budget.available_time() <= 0.0
+                            })
                     }
                     TurnOrderMode::InitiativeBased => {
                         // Not implemented yet
