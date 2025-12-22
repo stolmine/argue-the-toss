@@ -14,10 +14,14 @@ pub struct TurnState {
 
 impl TurnState {
     pub fn new() -> Self {
+        Self::new_with_mode(TurnOrderMode::PlayerFirst)
+    }
+
+    pub fn new_with_mode(turn_order_mode: TurnOrderMode) -> Self {
         Self {
             current_turn: 1,
             phase: TurnPhase::Planning,
-            turn_order_mode: TurnOrderMode::PlayerFirst,
+            turn_order_mode,
             entities_ready: HashSet::new(),
         }
     }

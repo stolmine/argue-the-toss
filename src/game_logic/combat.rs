@@ -14,6 +14,7 @@ pub struct CombatResult {
     pub hit_chance: f32,
     pub distance: i32,
     pub blocked_by_los: bool,
+    pub cover_bonus: f32,
 }
 
 /// Calculate if a shot hits and how much damage it deals
@@ -45,6 +46,7 @@ pub fn calculate_shot(
             hit_chance: 0.0,
             distance,
             blocked_by_los: false,
+            cover_bonus: 0.0,
         };
     }
 
@@ -57,8 +59,16 @@ pub fn calculate_shot(
             hit_chance: 0.0,
             distance,
             blocked_by_los: true,
+            cover_bonus: 0.0,
         };
     }
+
+    // Get target's cover bonus from terrain
+    let target_battlefield_pos = BattlefieldPos::new(target_pos.x(), target_pos.y());
+    let cover_bonus = battlefield
+        .get_tile(&target_battlefield_pos)
+        .map(|tile| tile.terrain.cover_bonus())
+        .unwrap_or(0.0);
 
     // Calculate hit chance based on range
     let hit_chance = calculate_hit_chance(weapon, distance);
@@ -69,7 +79,10 @@ pub fn calculate_shot(
     let hit = roll < hit_chance;
 
     let damage = if hit {
-        weapon.stats.damage
+        // Apply cover damage reduction
+        let base_damage = weapon.stats.damage as f32;
+        let reduced_damage = base_damage * (1.0 - cover_bonus);
+        reduced_damage.round() as i32
     } else {
         0
     };
@@ -80,6 +93,7 @@ pub fn calculate_shot(
         hit_chance,
         distance,
         blocked_by_los: false,
+        cover_bonus,
     }
 }
 

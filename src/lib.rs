@@ -9,6 +9,7 @@ pub mod systems;
 
 // UI and Rendering
 pub mod rendering;
+pub mod ui;
 
 // Core Game Logic
 pub mod game_logic;

@@ -16,6 +16,7 @@ use crate::components::{
 use crate::game_logic::{
     battlefield::Battlefield,
     line_of_sight::calculate_fov,
+    objectives::Objectives,
     pathfinding::calculate_path,
     turn_state::{TurnOrderMode, TurnPhase, TurnState},
 };
@@ -38,6 +39,7 @@ impl<'a> System<'a> for AIActionPlannerSystem {
         WriteStorage<'a, PlannedPath>,
         Read<'a, Battlefield>,
         Read<'a, TurnState>,
+        Read<'a, Objectives>,
     );
 
     fn run(
@@ -56,6 +58,7 @@ impl<'a> System<'a> for AIActionPlannerSystem {
             mut paths,
             battlefield,
             turn_state,
+            objectives,
         ): Self::SystemData,
     ) {
         // Only plan during Planning phase
@@ -134,7 +137,19 @@ impl<'a> System<'a> for AIActionPlannerSystem {
                 continue;
             }
 
-            // Priority 4: Wait (fallback)
+            // Priority 4: Move toward enemy objective flag
+            if try_move_toward_objective(
+                entity,
+                pos,
+                soldier,
+                &mut paths,
+                &objectives,
+                &battlefield,
+            ) {
+                continue;
+            }
+
+            // Priority 5: Wait (fallback)
             queue_wait_action(entity, &mut queued, budget);
         }
     }
@@ -279,6 +294,31 @@ fn try_move_toward_enemy(
                 .insert(entity, PlannedPath::new(path_steps, 0.0, false))
                 .ok();
             return true; // PathExecutionSystem will handle the movement
+        }
+    }
+
+    false
+}
+
+/// Extensible AI helper: Try to move toward enemy objective flag
+fn try_move_toward_objective(
+    entity: Entity,
+    pos: &Position,
+    soldier: &Soldier,
+    paths: &mut WriteStorage<PlannedPath>,
+    objectives: &Objectives,
+    battlefield: &Battlefield,
+) -> bool {
+    if let Some(flag_pos) = objectives.get_enemy_flag_position(soldier.faction) {
+        let ai_pos = pos.as_battlefield_pos();
+
+        if ai_pos.distance_to(&flag_pos) > 1.5 {
+            if let Some(path_steps) = calculate_path(ai_pos, &flag_pos, battlefield) {
+                paths
+                    .insert(entity, PlannedPath::new(path_steps, 0.0, false))
+                    .ok();
+                return true;
+            }
         }
     }
 

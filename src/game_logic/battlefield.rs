@@ -1,6 +1,7 @@
 // Battlefield grid structure and management
 
 use std::collections::HashMap;
+use super::terrain_properties::TerrainProperties;
 
 /// Represents a coordinate on the battlefield
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,50 +20,144 @@ impl Position {
         let dy = (self.y - other.y) as f32;
         (dx * dx + dy * dy).sqrt()
     }
+
+    /// Manhattan distance (for grid-based calculations)
+    pub fn manhattan_distance_to(&self, other: &Position) -> i32 {
+        (self.x - other.x).abs() + (self.y - other.y).abs()
+    }
 }
 
 /// Types of terrain on the battlefield
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerrainType {
-    Trench,
+    // Basic terrain
     NoMansLand,
+    Grass,
     Mud,
-    Fortification,
+    Water,
+    DeepWater,
+
+    // Multi-tile trench structures
+    TrenchFloor,
+    TrenchParapet,
+    TrenchRamp,
+
+    // Legacy trench (backward compatible)
+    Trench,
+
+    // Fortifications
+    Sandbags,
+    Bunker,
+    MgNest,
+    BarbedWire,
+
+    // Natural obstacles
     Tree,
+    Forest,
+    Hedge,
+    Rubble,
+
+    // Craters
+    ShellCrater,
+    CraterWater,
+
+    // Buildings
+    BuildingWall,
+    BuildingFloor,
+    BuildingDoor,
+    BuildingWindow,
+    Ruins,
+
+    // Roads
+    Road,
+    Path,
+
+    // Communication trenches
+    CommTrench,
+
+    // Special (backward compatible)
+    Fortification,
     CivilianBuilding,
 }
 
 impl TerrainType {
-    /// Returns the movement cost multiplier for this terrain
+    /// Get the comprehensive properties for this terrain type
+    pub fn properties(&self) -> TerrainProperties {
+        match self {
+            // Basic terrain
+            TerrainType::NoMansLand => TerrainProperties::NO_MANS_LAND,
+            TerrainType::Grass => TerrainProperties::GRASS,
+            TerrainType::Mud => TerrainProperties::MUD,
+            TerrainType::Water => TerrainProperties::WATER,
+            TerrainType::DeepWater => TerrainProperties::DEEP_WATER,
+
+            // Multi-tile trench structures
+            TerrainType::TrenchFloor => TerrainProperties::TRENCH_FLOOR,
+            TerrainType::TrenchParapet => TerrainProperties::TRENCH_PARAPET,
+            TerrainType::TrenchRamp => TerrainProperties::TRENCH_RAMP,
+
+            // Legacy trench
+            TerrainType::Trench => TerrainProperties::TRENCH,
+
+            // Fortifications
+            TerrainType::Sandbags => TerrainProperties::SANDBAGS,
+            TerrainType::Bunker => TerrainProperties::BUNKER,
+            TerrainType::MgNest => TerrainProperties::MG_NEST,
+            TerrainType::BarbedWire => TerrainProperties::BARBED_WIRE,
+
+            // Natural obstacles
+            TerrainType::Tree => TerrainProperties::TREE,
+            TerrainType::Forest => TerrainProperties::FOREST,
+            TerrainType::Hedge => TerrainProperties::HEDGE,
+            TerrainType::Rubble => TerrainProperties::RUBBLE,
+
+            // Craters
+            TerrainType::ShellCrater => TerrainProperties::SHELL_CRATER,
+            TerrainType::CraterWater => TerrainProperties::CRATER_WATER,
+
+            // Buildings
+            TerrainType::BuildingWall => TerrainProperties::BUILDING_WALL,
+            TerrainType::BuildingFloor => TerrainProperties::BUILDING_FLOOR,
+            TerrainType::BuildingDoor => TerrainProperties::BUILDING_DOOR,
+            TerrainType::BuildingWindow => TerrainProperties::BUILDING_WINDOW,
+            TerrainType::Ruins => TerrainProperties::RUINS,
+
+            // Roads
+            TerrainType::Road => TerrainProperties::ROAD,
+            TerrainType::Path => TerrainProperties::PATH,
+
+            // Communication trenches
+            TerrainType::CommTrench => TerrainProperties::COMM_TRENCH,
+
+            // Special (backward compatible)
+            TerrainType::Fortification => TerrainProperties::FORTIFICATION,
+            TerrainType::CivilianBuilding => TerrainProperties::CIVILIAN_BUILDING,
+        }
+    }
+
+    /// Returns the movement cost multiplier for this terrain (backward compatible)
     pub fn movement_cost(&self) -> f32 {
-        match self {
-            TerrainType::Trench => 1.0,
-            TerrainType::NoMansLand => 1.5,
-            TerrainType::Mud => 2.0,
-            TerrainType::Fortification => 0.5,
-            TerrainType::Tree => 1.8,
-            TerrainType::CivilianBuilding => 0.8,
-        }
+        self.properties().movement_cost
     }
 
-    /// Returns whether this terrain blocks line of sight
+    /// Returns whether this terrain blocks line of sight (backward compatible)
     pub fn blocks_los(&self) -> bool {
-        matches!(
-            self,
-            TerrainType::Fortification | TerrainType::Tree | TerrainType::CivilianBuilding
-        )
+        self.properties().blocks_los()
     }
 
-    /// Returns the ASCII character representation
+    /// Returns the ASCII character representation (backward compatible)
     pub fn to_char(&self) -> char {
-        match self {
-            TerrainType::Trench => '═',
-            TerrainType::NoMansLand => '.',
-            TerrainType::Mud => '~',
-            TerrainType::Fortification => '▓',
-            TerrainType::Tree => '♣',
-            TerrainType::CivilianBuilding => '▓',
-        }
+        self.properties().character
+    }
+
+    /// Returns whether this terrain is passable
+    pub fn is_passable(&self) -> bool {
+        self.properties().is_passable
+    }
+
+    /// Returns the cover bonus for combat
+    pub fn cover_bonus(&self) -> f32 {
+        self.properties().cover_bonus
     }
 }
 
@@ -84,12 +179,43 @@ impl Default for Tile {
     }
 }
 
+/// Spawn zone for a faction
+#[derive(Debug, Clone)]
+pub struct SpawnZone {
+    pub center: Position,
+    pub radius: usize,
+}
+
+impl SpawnZone {
+    pub fn new(center: Position, radius: usize) -> Self {
+        Self { center, radius }
+    }
+
+    pub fn contains(&self, pos: &Position) -> bool {
+        self.center.distance_to(pos) <= self.radius as f32
+    }
+}
+
 /// The main battlefield grid structure
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Battlefield {
     width: usize,
     height: usize,
     tiles: HashMap<Position, Tile>,
+    pub ally_spawn: Option<SpawnZone>,
+    pub enemy_spawn: Option<SpawnZone>,
+}
+
+impl Default for Battlefield {
+    fn default() -> Self {
+        Self {
+            width: 0,
+            height: 0,
+            tiles: HashMap::new(),
+            ally_spawn: None,
+            enemy_spawn: None,
+        }
+    }
 }
 
 impl Battlefield {
@@ -108,6 +234,8 @@ impl Battlefield {
             width,
             height,
             tiles,
+            ally_spawn: None,
+            enemy_spawn: None,
         }
     }
 
@@ -156,5 +284,64 @@ impl Battlefield {
         for tile in self.tiles.values_mut() {
             tile.visible = false;
         }
+    }
+
+    /// Set the spawn zones for both factions
+    pub fn set_spawn_zones(&mut self, ally_spawn: SpawnZone, enemy_spawn: SpawnZone) {
+        self.ally_spawn = Some(ally_spawn);
+        self.enemy_spawn = Some(enemy_spawn);
+    }
+
+    /// Get spawn positions for a faction
+    pub fn get_spawn_positions(&self, is_allies: bool, count: usize) -> Vec<Position> {
+        use rand::Rng;
+
+        let spawn_zone = if is_allies {
+            &self.ally_spawn
+        } else {
+            &self.enemy_spawn
+        };
+
+        let zone = match spawn_zone {
+            Some(z) => z,
+            None => return vec![],
+        };
+
+        let mut rng = rand::thread_rng();
+        let mut positions = Vec::new();
+        let mut attempts = 0;
+        let max_attempts = count * 50;
+
+        while positions.len() < count && attempts < max_attempts {
+            attempts += 1;
+
+            let offset_x = rng.random_range(-(zone.radius as i32)..=(zone.radius as i32));
+            let offset_y = rng.random_range(-(zone.radius as i32)..=(zone.radius as i32));
+
+            let pos = Position::new(zone.center.x + offset_x, zone.center.y + offset_y);
+
+            if !self.in_bounds(&pos) {
+                continue;
+            }
+
+            if !zone.contains(&pos) {
+                continue;
+            }
+
+            if positions.iter().any(|p: &Position| p.distance_to(&pos) < 2.0) {
+                continue;
+            }
+
+            if let Some(tile) = self.get_tile(&pos) {
+                let terrain = tile.terrain;
+                if !terrain.is_passable() || matches!(terrain, TerrainType::Water | TerrainType::DeepWater) {
+                    continue;
+                }
+            }
+
+            positions.push(pos);
+        }
+
+        positions
     }
 }

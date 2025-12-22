@@ -3,6 +3,7 @@
 
 pub mod action_execution;
 pub mod ai_action_planner;
+pub mod objective_capture;
 pub mod path_execution;
 pub mod turn_manager;
 

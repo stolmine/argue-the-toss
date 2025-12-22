@@ -18,7 +18,8 @@ use argue_the_toss::{
     },
     config::game_config::GameConfig,
     game_logic::{
-        battlefield::{Battlefield, Position as BattlefieldPos, TerrainType},
+        battlefield::{Battlefield, Position as BattlefieldPos},
+        objectives::{ObjectiveFlag, Objectives},
         pathfinding::calculate_path,
         shared_vision::calculate_faction_vision,
         turn_state::TurnState,
@@ -26,7 +27,14 @@ use argue_the_toss::{
     rendering::{viewport::Camera, widgets::BattlefieldWidget},
     systems::{
         action_execution::ActionExecutionSystem, ai_action_planner::AIActionPlannerSystem,
-        path_execution::PathExecutionSystem, turn_manager::TurnManagerSystem,
+        objective_capture::ObjectiveCaptureSystem, path_execution::PathExecutionSystem,
+        turn_manager::TurnManagerSystem,
+    },
+    ui::menu::{
+        main_menu::{MainMenuState, MainMenuWidget},
+        new_game_config::{NewGameConfigState, NewGameConfigWidget},
+        settings_menu::{SettingsMenuState, SettingsMenuWidget},
+        widgets::MenuAction,
     },
     utils::{event_log::EventLog, input_mode::InputMode},
 };
@@ -49,26 +57,135 @@ use std::io;
 use std::collections::{HashMap, HashSet};
 use specs::Entity;
 
-/// Main game state
+enum AppState {
+    MainMenu,
+    NewGameConfig,
+    InGame(GameState),
+    Paused(GameState),
+    Settings,
+}
+
 struct GameState {
     world: World,
     battlefield: Battlefield,
     camera: Camera,
     running: bool,
     input_mode: InputMode,
-    cursor_pos: BattlefieldPos, // For Look mode
+    cursor_pos: BattlefieldPos,
     config: GameConfig,
-    peripheral_tiles: HashMap<BattlefieldPos, bool>, // Track which tiles are peripheral vision
-    spotter_map: HashMap<BattlefieldPos, Entity>, // Track which entity spotted each tile
-    last_seen_markers: HashMap<Entity, LastSeenMarker>, // Track last-seen markers by tracked entity
-    visible_entities: HashSet<Entity>, // Entities that were visible last turn
+    peripheral_tiles: HashMap<BattlefieldPos, bool>,
+    spotter_map: HashMap<BattlefieldPos, Entity>,
+    last_seen_markers: HashMap<Entity, LastSeenMarker>,
+    visible_entities: HashSet<Entity>,
+}
+
+fn spawn_soldiers(
+    world: &mut World,
+    battlefield: &Battlefield,
+    config: &GameConfig,
+    soldier_count: usize,
+) -> BattlefieldPos {
+    let ally_positions = battlefield.get_spawn_positions(true, soldier_count + 1);
+    let enemy_positions = battlefield.get_spawn_positions(false, soldier_count);
+
+    if ally_positions.is_empty() {
+        panic!("Failed to generate ally spawn positions!");
+    }
+
+    let player_pos = ally_positions[0];
+    world
+        .create_entity()
+        .with(Position::new(player_pos.x, player_pos.y))
+        .with(Soldier {
+            name: "Pvt. Smith".to_string(),
+            faction: Faction::Allies,
+            rank: Rank::Private,
+        })
+        .with(Player)
+        .with(TimeBudget::new(config.time_budget_seconds))
+        .with(Vision::new(10))
+        .with(Weapon::rifle())
+        .with(Health::soldier())
+        .with(Facing::new(Direction8::N))
+        .build();
+
+    let ally_names = ["Sgt. Jones", "Pvt. Taylor", "Cpl. Brown", "Pvt. Davis", "Pvt. Wilson"];
+    let enemy_names = ["Pvt. Mueller", "Cpl. Schmidt", "Pvt. Weber", "Sgt. Fischer", "Pvt. Bauer"];
+
+    for i in 0..soldier_count.min(ally_positions.len() - 1) {
+        let pos = ally_positions[i + 1];
+
+        let name = if i < ally_names.len() {
+            ally_names[i].to_string()
+        } else {
+            format!("Pvt. Ally {}", i + 1)
+        };
+
+        world
+            .create_entity()
+            .with(Position::new(pos.x, pos.y))
+            .with(Soldier {
+                name,
+                faction: Faction::Allies,
+                rank: if i == 0 { Rank::Sergeant } else { Rank::Private },
+            })
+            .with(TimeBudget::new(config.time_budget_seconds))
+            .with(Vision::new(10))
+            .with(Weapon::rifle())
+            .with(Health::soldier())
+            .with(Facing::new(Direction8::W))
+            .build();
+    }
+
+    for i in 0..soldier_count.min(enemy_positions.len()) {
+        let pos = enemy_positions[i];
+
+        let name = if i < enemy_names.len() {
+            enemy_names[i].to_string()
+        } else {
+            format!("Pvt. Enemy {}", i + 1)
+        };
+
+        world
+            .create_entity()
+            .with(Position::new(pos.x, pos.y))
+            .with(Soldier {
+                name,
+                faction: Faction::CentralPowers,
+                rank: if i == 1 { Rank::Sergeant } else { Rank::Private },
+            })
+            .with(TimeBudget::new(config.time_budget_seconds))
+            .with(Vision::new(10))
+            .with(Weapon::rifle())
+            .with(Health::soldier())
+            .with(Facing::new(Direction8::E))
+            .build();
+    }
+
+    player_pos
 }
 
 impl GameState {
     fn new(viewport_width: usize, viewport_height: usize) -> Self {
+        use argue_the_toss::config::battlefield_config::BattlefieldGenerationConfig;
+        Self::with_config(
+            viewport_width,
+            viewport_height,
+            GameConfig::default(),
+            BattlefieldGenerationConfig::default(),
+            2,
+        )
+    }
+
+    fn with_config(
+        viewport_width: usize,
+        viewport_height: usize,
+        config: GameConfig,
+        battlefield_config: argue_the_toss::config::battlefield_config::BattlefieldGenerationConfig,
+        soldier_count: usize,
+    ) -> Self {
         let mut world = World::new();
 
-        // Register components
         world.register::<Position>();
         world.register::<Soldier>();
         world.register::<Player>();
@@ -83,136 +200,33 @@ impl GameState {
         world.register::<Facing>();
         world.register::<LastSeenMarker>();
 
-        // Create game config
-        let config = GameConfig::default();
-
-        // Create event log
         let mut event_log = EventLog::new();
         event_log.add("Welcome to Argue the Toss!".to_string());
         event_log.add("WWI Trench Warfare Roguelike".to_string());
 
-        // Insert resources
-        world.insert(TurnState::new());
+        world.insert(TurnState::new_with_mode(config.turn_order_mode));
         world.insert(event_log);
 
-        // Create battlefield (100x100 grid)
-        let mut battlefield = Battlefield::new(100, 100);
-
-        // Add some terrain variety
-        for x in 10..90 {
-            battlefield.set_terrain(
-                BattlefieldPos::new(x, 20),
-                TerrainType::Trench,
-            );
-            battlefield.set_terrain(
-                BattlefieldPos::new(x, 80),
-                TerrainType::Trench,
-            );
-        }
-
-        for y in 25..75 {
-            for x in 40..60 {
-                battlefield.set_terrain(
-                    BattlefieldPos::new(x, y),
-                    TerrainType::Mud,
-                );
-            }
-        }
-
-        // Add some trees (blocks LOS)
-        for y in 30..35 {
-            for x in 45..50 {
-                battlefield.set_terrain(
-                    BattlefieldPos::new(x, y),
-                    TerrainType::Tree,
-                );
-            }
-        }
-
-        // Add a civilian building (blocks LOS)
-        for y in 60..65 {
-            for x in 50..55 {
-                battlefield.set_terrain(
-                    BattlefieldPos::new(x, y),
-                    TerrainType::CivilianBuilding,
-                );
-            }
-        }
-
-        // Insert battlefield as a world resource for systems to access
+        use argue_the_toss::game_logic::terrain_generation::BattlefieldGenerator;
+        let mut generator = BattlefieldGenerator::new(battlefield_config);
+        let battlefield = generator.generate();
         world.insert(battlefield.clone());
 
-        // Player starting position
-        let player_start_pos = BattlefieldPos::new(50, 50);
-
-        // Create camera centered at player position with adaptive viewport
+        let player_start_pos = spawn_soldiers(&mut world, &battlefield, &config, soldier_count);
         let camera = Camera::new(player_start_pos, viewport_width, viewport_height);
 
-        // Create some test soldiers
-        // First soldier is player-controlled
-        world
-            .create_entity()
-            .with(Position::new(player_start_pos.x, player_start_pos.y))
-            .with(Soldier {
-                name: "Pvt. Smith".to_string(),
-                faction: Faction::Allies,
-                rank: Rank::Private,
-            })
-            .with(Player)
-            .with(TimeBudget::new(config.time_budget_seconds))
-            .with(Vision::new(10))
-            .with(Weapon::rifle())
-            .with(Health::soldier())
-            .with(Facing::new(Direction8::N))
-            .build();
-
-        // Allied NPC
-        world
-            .create_entity()
-            .with(Position::new(55, 52))
-            .with(Soldier {
-                name: "Sgt. Jones".to_string(),
-                faction: Faction::Allies,
-                rank: Rank::Sergeant,
-            })
-            .with(TimeBudget::new(config.time_budget_seconds))
-            .with(Vision::new(10))
-            .with(Weapon::rifle())
-            .with(Health::soldier())
-            .with(Facing::new(Direction8::W))
-            .build();
-
-        // Enemy NPC 1
-        world
-            .create_entity()
-            .with(Position::new(45, 48))
-            .with(Soldier {
-                name: "Pvt. Mueller".to_string(),
-                faction: Faction::CentralPowers,
-                rank: Rank::Private,
-            })
-            .with(TimeBudget::new(config.time_budget_seconds))
-            .with(Vision::new(10))
-            .with(Weapon::rifle())
-            .with(Health::soldier())
-            .with(Facing::new(Direction8::E))
-            .build();
-
-        // Enemy NPC 2 (for testing)
-        world
-            .create_entity()
-            .with(Position::new(43, 50))
-            .with(Soldier {
-                name: "Cpl. Schmidt".to_string(),
-                faction: Faction::CentralPowers,
-                rank: Rank::Corporal,
-            })
-            .with(TimeBudget::new(config.time_budget_seconds))
-            .with(Vision::new(10))
-            .with(Weapon::rifle())
-            .with(Health::soldier())
-            .with(Facing::new(Direction8::E))
-            .build();
+        let mut objectives = Objectives::new();
+        let allies_flag = ObjectiveFlag::new(
+            BattlefieldPos::new(player_start_pos.x - 20, player_start_pos.y + 15),
+            Faction::Allies
+        );
+        let central_flag = ObjectiveFlag::new(
+            BattlefieldPos::new(player_start_pos.x + 20, player_start_pos.y - 15),
+            Faction::CentralPowers
+        );
+        objectives.add_flag("allies".to_string(), allies_flag);
+        objectives.add_flag("central".to_string(), central_flag);
+        world.insert(objectives);
 
         Self {
             world,
@@ -827,14 +841,7 @@ impl GameState {
     /// Get terrain description at a position
     fn get_terrain_info(&self, pos: &BattlefieldPos) -> String {
         if let Some(tile) = self.battlefield.get_tile(pos) {
-            let terrain_name = match tile.terrain {
-                TerrainType::Trench => "Trench",
-                TerrainType::NoMansLand => "No Man's Land",
-                TerrainType::Mud => "Mud",
-                TerrainType::Fortification => "Fortification",
-                TerrainType::Tree => "Tree",
-                TerrainType::CivilianBuilding => "Civilian Building",
-            };
+            let terrain_name = tile.terrain.properties().name;
             let visibility = if tile.visible {
                 "visible"
             } else if tile.explored {
@@ -1026,9 +1033,12 @@ fn ui(f: &mut Frame, state: &GameState) {
     let inner_area = battlefield_block.inner(top_chunks[0]);
     f.render_widget(battlefield_block, top_chunks[0]);
 
+    let objectives = state.world.fetch::<Objectives>();
     let battlefield_widget = BattlefieldWidget::new(&state.battlefield, &state.camera)
-        .with_peripheral_tiles(&state.peripheral_tiles);
+        .with_peripheral_tiles(&state.peripheral_tiles)
+        .with_objectives(&objectives);
     f.render_widget(battlefield_widget, inner_area);
+    drop(objectives);
 
     // Render planned paths (before soldiers so they appear underneath)
     render_paths(f, inner_area, state);
@@ -1648,75 +1658,198 @@ fn render_targeting_cursor(f: &mut Frame, area: Rect, state: &GameState) {
 }
 
 fn main() -> Result<(), io::Error> {
-    // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Get initial terminal size
     let size = terminal.size()?;
     let initial_width = (size.width.saturating_sub(2)) as usize;
     let initial_height = (size.height.saturating_sub(7)) as usize;
 
-    // Create game state with adaptive viewport
-    let mut game_state = GameState::new(initial_width, initial_height);
+    let mut app_state = AppState::MainMenu;
+    let mut main_menu_state = MainMenuState::new();
+    let mut new_game_config_state = NewGameConfigState::new();
+    let mut settings_menu_state = SettingsMenuState::new();
+    let mut running = true;
 
-    // Create ECS dispatcher for turn-based systems
     let mut dispatcher = DispatcherBuilder::new()
         .with(PathExecutionSystem, "path_execution", &[])
         .with(AIActionPlannerSystem, "ai_planner", &["path_execution"])
         .with(ActionExecutionSystem, "action_execution", &[])
-        .with(TurnManagerSystem, "turn_manager", &["action_execution"])
+        .with(ObjectiveCaptureSystem, "objective_capture", &["action_execution"])
+        .with(TurnManagerSystem, "turn_manager", &["objective_capture"])
         .build();
 
-    // Main game loop
-    while game_state.running {
-        // Update visibility
-        game_state.update_visibility();
-
-        // Render
+    while running {
         terminal.draw(|f| {
-            // Update viewport size if terminal was resized
-            game_state.update_viewport_size(f.area());
-            ui(f, &game_state)
+            match &mut app_state {
+                AppState::MainMenu => {
+                    let widget = MainMenuWidget::new(main_menu_state.items(), main_menu_state.selected_index());
+                    f.render_widget(widget, f.area());
+                }
+                AppState::NewGameConfig => {
+                    let widget = NewGameConfigWidget::new(&new_game_config_state);
+                    f.render_widget(widget, f.area());
+                }
+                AppState::Settings => {
+                    let widget = SettingsMenuWidget::new(&settings_menu_state);
+                    f.render_widget(widget, f.area());
+                }
+                AppState::InGame(game_state) => {
+                    game_state.update_viewport_size(f.area());
+                    ui(f, game_state);
+                }
+                AppState::Paused(game_state) => {
+                    ui(f, game_state);
+                }
+            }
         })?;
 
-        // Run ECS systems (process turns, AI, actions)
-        dispatcher.dispatch(&game_state.world);
-        game_state.world.maintain();
+        if let AppState::InGame(game_state) = &mut app_state {
+            game_state.update_visibility();
+            dispatcher.dispatch(&game_state.world);
+            game_state.world.maintain();
+        }
 
-        // Handle input (only in planning phase)
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                let turn_state = game_state.world.fetch::<TurnState>();
-                let can_input = matches!(turn_state.phase, argue_the_toss::game_logic::turn_state::TurnPhase::Planning);
-
-                // In PlayerFirst mode, only accept input if player hasn't finished
-                let player_can_act = if matches!(
-                    turn_state.turn_order_mode,
-                    argue_the_toss::game_logic::turn_state::TurnOrderMode::PlayerFirst
-                ) {
-                    if let Some(player_entity) = game_state.get_player_entity() {
-                        !turn_state.is_entity_ready(player_entity)
-                    } else {
-                        false
+                match &mut app_state {
+                    AppState::MainMenu => {
+                        if let Some(action) = main_menu_state.handle_input(key) {
+                            match action {
+                                MenuAction::StartGame => {
+                                    app_state = AppState::NewGameConfig;
+                                }
+                                MenuAction::Settings => {
+                                    app_state = AppState::Settings;
+                                }
+                                MenuAction::Quit => {
+                                    running = false;
+                                }
+                                _ => {}
+                            }
+                        }
                     }
-                } else {
-                    true // In other modes, player can always act during Planning
-                };
+                    AppState::NewGameConfig => {
+                        match key.code {
+                            KeyCode::Esc => {
+                                app_state = AppState::MainMenu;
+                            }
+                            KeyCode::Enter => {
+                                if new_game_config_state.is_start_selected() {
+                                    let game_config = new_game_config_state.to_game_config();
+                                    let battlefield_config = new_game_config_state.to_battlefield_config();
+                                    let soldier_count = new_game_config_state.soldier_count();
 
-                drop(turn_state); // Release borrow
+                                    let game_state = GameState::with_config(
+                                        initial_width,
+                                        initial_height,
+                                        game_config,
+                                        battlefield_config,
+                                        soldier_count,
+                                    );
+                                    app_state = AppState::InGame(game_state);
+                                } else if new_game_config_state.is_back_selected() {
+                                    app_state = AppState::MainMenu;
+                                }
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                new_game_config_state.handle_up();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                new_game_config_state.handle_down();
+                            }
+                            KeyCode::Left | KeyCode::Char('h') => {
+                                new_game_config_state.handle_left();
+                            }
+                            KeyCode::Right | KeyCode::Char('l') => {
+                                new_game_config_state.handle_right();
+                            }
+                            KeyCode::Tab => {
+                                new_game_config_state.handle_tab();
+                            }
+                            _ => {}
+                        }
+                    }
+                    AppState::Settings => {
+                        match key.code {
+                            KeyCode::Esc => {
+                                app_state = AppState::MainMenu;
+                            }
+                            KeyCode::Enter => {
+                                if settings_menu_state.selected_index == 2 {
+                                    app_state = AppState::MainMenu;
+                                } else if settings_menu_state.selected_index == 3 {
+                                    app_state = AppState::MainMenu;
+                                }
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                settings_menu_state.select_prev();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                settings_menu_state.select_next();
+                            }
+                            KeyCode::Left | KeyCode::Char('h') => {
+                                settings_menu_state.handle_left();
+                            }
+                            KeyCode::Right | KeyCode::Char('l') => {
+                                settings_menu_state.handle_right();
+                            }
+                            _ => {}
+                        }
+                    }
+                    AppState::InGame(game_state) => {
+                        match key.code {
+                            KeyCode::Esc => {
+                                let current_state = std::mem::replace(&mut app_state, AppState::MainMenu);
+                                if let AppState::InGame(gs) = current_state {
+                                    app_state = AppState::Paused(gs);
+                                }
+                            }
+                            _ => {
+                                let turn_state = game_state.world.fetch::<TurnState>();
+                                let can_input = matches!(turn_state.phase, argue_the_toss::game_logic::turn_state::TurnPhase::Planning);
+                                let player_can_act = if matches!(
+                                    turn_state.turn_order_mode,
+                                    argue_the_toss::game_logic::turn_state::TurnOrderMode::PlayerFirst
+                                ) {
+                                    if let Some(player_entity) = game_state.get_player_entity() {
+                                        !turn_state.is_entity_ready(player_entity)
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    true
+                                };
+                                drop(turn_state);
 
-                if can_input && player_can_act {
-                    game_state.handle_input(key);
+                                if can_input && player_can_act {
+                                    game_state.handle_input(key);
+                                }
+                            }
+                        }
+                    }
+                    AppState::Paused(_game_state) => {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('r') => {
+                                let current_state = std::mem::replace(&mut app_state, AppState::MainMenu);
+                                if let AppState::Paused(gs) = current_state {
+                                    app_state = AppState::InGame(gs);
+                                }
+                            }
+                            KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                app_state = AppState::MainMenu;
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
         }
     }
 
-    // Restore terminal
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;

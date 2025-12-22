@@ -113,12 +113,19 @@ impl<'a> BaseMap for BattlefieldPathMap<'a> {
                     continue;
                 }
 
-                // Get terrain cost multiplier (1.0 - 2.0)
-                let terrain_cost = self
+                // Check if terrain is passable
+                let terrain = self
                     .battlefield
                     .get_tile(&new_pos)
-                    .map(|t| t.terrain.movement_cost())
-                    .unwrap_or(1.0);
+                    .map(|t| t.terrain)
+                    .unwrap_or(crate::game_logic::battlefield::TerrainType::NoMansLand);
+
+                if !terrain.is_passable() {
+                    continue; // Skip impassable terrain
+                }
+
+                // Get terrain cost multiplier
+                let terrain_cost = terrain.movement_cost();
 
                 // Calculate distance cost (1.0 for cardinal, ~1.414 for diagonal)
                 let distance_cost = if dx != 0 && dy != 0 {
