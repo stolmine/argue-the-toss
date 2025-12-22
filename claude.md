@@ -10,3 +10,5 @@
     - Agent usage best practices                              
     - Rust-specific coding standards                          
     - ECS patterns and performance guidelines
+
+    - stay DRY as much as possible
