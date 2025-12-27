@@ -39,9 +39,12 @@ pub trait Consideration: Send + Sync {
             let result = self.evaluate(context);
             let elapsed = start.elapsed();
 
-            if elapsed.as_micros() > 100 {  // Log if > 100μs
-                eprintln!("[PERF] {} took {}μs", self.name(), elapsed.as_micros());
-            }
+            // Performance logging removed - it breaks TUI rendering
+            // Re-enable manually if needed for debugging specific considerations
+            // if elapsed.as_micros() > 100 {
+            //     eprintln!("[PERF] {} took {}μs", self.name(), elapsed.as_micros());
+            // }
+
             result
         } else {
             self.evaluate(context)

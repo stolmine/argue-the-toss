@@ -23,7 +23,8 @@
 // and fail to execute, causing the "movement bug."
 
 use crate::components::{
-    action::QueuedAction, dead::Dead, player::Player, time_budget::TimeBudget,
+    action::QueuedAction, dead::Dead, muzzle_flash::MuzzleFlash, player::Player,
+    time_budget::TimeBudget,
 };
 use crate::game_logic::turn_state::{TurnOrderMode, TurnPhase, TurnState};
 use crate::utils::event_log::EventLog;
@@ -40,11 +41,12 @@ impl<'a> System<'a> for TurnManagerSystem {
         ReadStorage<'a, Player>,
         ReadStorage<'a, Dead>,
         Write<'a, EventLog>,
+        WriteStorage<'a, MuzzleFlash>,
     );
 
     fn run(
         &mut self,
-        (entities, mut turn_state, mut budgets, mut actions, players, dead_markers, mut log): Self::SystemData,
+        (entities, mut turn_state, mut budgets, mut actions, players, dead_markers, mut log, mut muzzle_flashes): Self::SystemData,
     ) {
         match turn_state.phase {
             TurnPhase::Planning => {
@@ -85,6 +87,16 @@ impl<'a> System<'a> for TurnManagerSystem {
                 };
 
                 if all_ready {
+                    // Clear muzzle flashes before executing new turn
+                    // (they persisted through Resolution and Planning so player could see them)
+                    let flashes_to_remove: Vec<_> = (&entities, &muzzle_flashes)
+                        .join()
+                        .map(|(entity, _)| entity)
+                        .collect();
+                    for entity in flashes_to_remove {
+                        muzzle_flashes.remove(entity);
+                    }
+
                     turn_state.phase = TurnPhase::Execution;
                     log.add("=== Executing Turn ===".to_string());
                 }
@@ -104,6 +116,9 @@ impl<'a> System<'a> for TurnManagerSystem {
             TurnPhase::Resolution => {
                 // Clear executed actions
                 actions.clear();
+
+                // NOTE: Muzzle flashes are NOT cleared here - they persist into Planning phase
+                // so the player can see what happened. They're cleared at the start of Planning.
 
                 // Reset time budgets for new turn (keep debt)
                 for budget in (&mut budgets).join() {

@@ -25,3 +25,6 @@ pub mod config;
 
 // AI Systems
 pub mod ai;
+
+// Game Loop Guard
+pub mod game_loop_guard;

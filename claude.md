@@ -24,9 +24,11 @@
    - event::poll() and event::read()
    - Process player commands (Space key, movement, etc.)
    - Mark player as ready in TurnState
+   - Track if input occurred (input_occurred flag)
 
-2. SYSTEMS DISPATCH SECOND
-   - dispatcher.dispatch(&world)
+2. SYSTEMS DISPATCH SECOND (ONLY IF INPUT OCCURRED!)
+   - CRITICAL: Only call dispatcher.dispatch() when input_occurred = true
+   - In turn-based games, don't dispatch every frame!
    - Systems see updated input state
    - Turn manager advances phases
    - Actions execute
@@ -34,6 +36,7 @@
 3. RENDERING THIRD
    - terminal.draw()
    - Shows visual effects (muzzle flashes, etc.)
+   - Renders EVERY frame (independent of input)
 
 4. CLEANUP LAST
    - Remove temporary visual effects
@@ -43,8 +46,11 @@
 ### Why This Order Matters:
 - Turn manager waits for player to mark ready (via input)
 - If dispatch runs BEFORE input, turn manager sees old state → DEADLOCK
+- If dispatch runs EVERY frame (even without input), turn advances before input processed → DEADLOCK
 - Systems must run BEFORE rendering for visual effects to appear
 - Cleanup must run AFTER rendering so effects are visible
+- GameLoopGuard enforces ORDER but can't prevent excessive dispatch calls
+- input_occurred flag prevents dispatch when unnecessary
 
 ### System Dispatcher Order (see turn_manager.rs comments):
 ```

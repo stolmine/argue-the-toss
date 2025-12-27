@@ -19,6 +19,7 @@ use argue_the_toss::{
         weapon::Weapon,
     },
     config::game_config::GameConfig,
+    game_loop_guard::GameLoopGuard,
     game_logic::{
         battlefield::{Battlefield, Position as BattlefieldPos},
         objectives::{ObjectiveFlag, Objectives},
@@ -310,10 +311,13 @@ impl GameState {
             KeyCode::Char('l') => {
                 // Enter Look mode
                 self.input_mode = InputMode::Look;
-                // Set cursor to player position
-                if let Some(player_pos) = self.get_player_position() {
-                    self.cursor_pos = player_pos;
-                }
+                // Set cursor to center of viewport (not player which might be off-screen)
+                let top_left = self.camera.top_left();
+                let viewport_center = BattlefieldPos::new(
+                    top_left.x + (self.camera.viewport_width / 2) as i32,
+                    top_left.y + (self.camera.viewport_height / 2) as i32,
+                );
+                self.cursor_pos = viewport_center;
             }
 
             // Center camera
@@ -335,10 +339,13 @@ impl GameState {
             KeyCode::Char('f') => {
                 // Enter targeting mode for shooting
                 self.input_mode = InputMode::Targeting;
-                // Set cursor to player position
-                if let Some(player_pos) = self.get_player_position() {
-                    self.cursor_pos = player_pos;
-                }
+                // Set cursor to center of viewport (not player which might be off-screen)
+                let top_left = self.camera.top_left();
+                let viewport_center = BattlefieldPos::new(
+                    top_left.x + (self.camera.viewport_width / 2) as i32,
+                    top_left.y + (self.camera.viewport_height / 2) as i32,
+                );
+                self.cursor_pos = viewport_center;
             }
 
             // Reload
@@ -1456,10 +1463,23 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
     let soldiers = state.world.read_storage::<Soldier>();
     let players = state.world.read_storage::<Player>();
     let dead_markers = state.world.read_storage::<Dead>();
+    let muzzle_flashes = state.world.read_storage::<MuzzleFlash>();
 
     let top_left = state.camera.top_left();
 
+    // First pass: render dead soldiers (corpses at bottom z-level)
     for (entity, pos, soldier) in (&entities, &positions, &soldiers).join() {
+        if !dead_markers.contains(entity) {
+            continue; // Skip living soldiers in this pass
+        }
+
+        // Only render if visible to player (FOV check)
+        // Allied corpses always visible (you know where your fallen are)
+        let is_ally = soldier.faction == Faction::Allies;
+        if !is_ally && !state.visible_entities.contains(&entity) {
+            continue;
+        }
+
         let screen_x = pos.x() - top_left.x;
         let screen_y = pos.y() - top_left.y;
 
@@ -1473,21 +1493,50 @@ fn render_soldiers(f: &mut Frame, area: Rect, state: &GameState) {
             let buf_y = area.y + screen_y as u16;
 
             if buf_x < area.right() && buf_y < area.bottom() {
-                // Check if entity is dead
-                let is_dead = dead_markers.contains(entity);
+                f.buffer_mut()[(buf_x, buf_y)]
+                    .set_char('X') // Dead bodies shown as X
+                    .set_style(Style::default().fg(Color::DarkGray));
+            }
+        }
+    }
 
-                let ch = if is_dead {
-                    'X' // Dead bodies shown as X
-                } else if players.contains(entity) {
+    // Second pass: render living soldiers (on top of corpses)
+    for (entity, pos, soldier) in (&entities, &positions, &soldiers).join() {
+        if dead_markers.contains(entity) {
+            continue; // Skip dead soldiers in this pass
+        }
+
+        // Only render if:
+        // 1. Player (always visible)
+        // 2. Allied unit (always visible - you know where your allies are)
+        // 3. Enemy in visible_entities (FOV check)
+        // 4. Entity has muzzle flash (revealed by firing)
+        let is_ally = soldier.faction == Faction::Allies;
+        let recently_fired = muzzle_flashes.contains(entity);
+        if !players.contains(entity) && !is_ally && !recently_fired && !state.visible_entities.contains(&entity) {
+            continue;
+        }
+
+        let screen_x = pos.x() - top_left.x;
+        let screen_y = pos.y() - top_left.y;
+
+        // Only render if within viewport
+        if screen_x >= 0
+            && screen_x < area.width as i32
+            && screen_y >= 0
+            && screen_y < area.height as i32
+        {
+            let buf_x = area.x + screen_x as u16;
+            let buf_y = area.y + screen_y as u16;
+
+            if buf_x < area.right() && buf_y < area.bottom() {
+                let ch = if players.contains(entity) {
                     '@' // Player character
                 } else {
                     soldier.rank.to_icon() // Rank icon
                 };
 
-                // Color based on status
-                let color = if is_dead {
-                    Color::DarkGray // Dead entities are dark gray
-                } else if players.contains(entity) {
+                let color = if players.contains(entity) {
                     Color::Rgb(0, 255, 255) // Player is bright cyan (unique color)
                 } else {
                     match soldier.faction {
@@ -1579,9 +1628,12 @@ fn render_cursor(f: &mut Frame, area: Rect, state: &GameState) {
         let buf_y = area.y + screen_y as u16;
 
         if buf_x < area.right() && buf_y < area.bottom() {
-            // Render cursor as a highlighted square
+            // Render cursor as a highlighted square with X character
+            // Set both char and background to ensure visibility
+            let current_char = f.buffer_mut()[(buf_x, buf_y)].symbol().chars().next().unwrap_or(' ');
             f.buffer_mut()[(buf_x, buf_y)]
-                .set_style(Style::default().bg(Color::Yellow));
+                .set_char(if current_char == ' ' { 'X' } else { current_char })
+                .set_style(Style::default().fg(Color::Black).bg(Color::Yellow));
         }
     }
 }
@@ -1763,9 +1815,16 @@ fn main() -> Result<(), io::Error> {
         .build();
 
     while running {
+        // Create guard - enforces correct execution order
+        let guard = GameLoopGuard::new();
+
+        // Track if input was processed this frame (determines if we need to dispatch)
+        let mut input_occurred = false;
+
         // First: Handle input so systems see the latest player actions
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
+                input_occurred = true;
                 match &mut app_state {
                     AppState::MainMenu => {
                         if let Some(action) = main_menu_state.handle_input(key) {
@@ -1906,12 +1965,21 @@ fn main() -> Result<(), io::Error> {
             }
         }
 
-        // Second: Update game state with the processed input (systems run)
-        if let AppState::InGame(game_state) = &mut app_state {
-            game_state.update_visibility();
-            dispatcher.dispatch(&game_state.world);
-            game_state.world.maintain();
+        // Type transitions to NeedDispatch - input processing complete
+        let guard = guard.input_processed();
+
+        // Second: Update game state ONLY if input occurred (turn-based game!)
+        // Don't dispatch every frame - only when player/AI actions change game state
+        if input_occurred {
+            if let AppState::InGame(game_state) = &mut app_state {
+                game_state.update_visibility();
+                dispatcher.dispatch(&game_state.world);
+                game_state.world.maintain();
+            }
         }
+
+        // Type transitions to NeedRender - systems dispatch complete
+        let guard = guard.systems_dispatched();
 
         // Third: Render with updated state (muzzle flashes visible)
         terminal.draw(|f| {
@@ -1938,18 +2006,14 @@ fn main() -> Result<(), io::Error> {
             }
         })?;
 
-        // Fourth: Clean up muzzle flashes AFTER rendering (so they were visible this frame)
-        if let AppState::InGame(game_state) = &mut app_state {
-            let entities = game_state.world.entities();
-            let mut muzzle_flashes = game_state.world.write_storage::<MuzzleFlash>();
-            let to_remove: Vec<_> = (&entities, &muzzle_flashes)
-                .join()
-                .map(|(entity, _)| entity)
-                .collect();
-            for entity in to_remove {
-                muzzle_flashes.remove(entity);
-            }
-        }
+        // Type transitions to Complete - rendering complete
+        let guard = guard.rendering_complete();
+
+        // Frame complete - guard consumed
+        guard.frame_complete();
+
+        // Muzzle flashes are now cleaned up at start of Planning phase
+        // (see TurnManagerSystem) so they persist into player's turn
     }
 
     disable_raw_mode()?;

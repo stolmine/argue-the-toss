@@ -157,7 +157,7 @@ fn create_balanced_move_evaluator() -> ActionEvaluator {
 }
 
 fn create_balanced_seek_cover_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekCover", 0.7)
+    ActionEvaluator::new("SeekCover", 0.6)  // Reduced from 0.7
         .with_consideration(Box::new(HealthLevelConsideration::new(
             ResponseCurve::Inverse,
         )))
@@ -171,7 +171,7 @@ fn create_balanced_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_balanced_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.65)  // Increased from 0.4
+    ActionEvaluator::new("SeekObjective", 0.75)  // Increased from 0.65
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Inverse,
         )))
@@ -263,7 +263,7 @@ fn create_aggressive_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_aggressive_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.6)  // Increased from 0.3
+    ActionEvaluator::new("SeekObjective", 0.7)  // Increased from 0.6
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Inverse,
         )))
@@ -271,7 +271,7 @@ fn create_aggressive_seek_objective_evaluator() -> ActionEvaluator {
             ResponseCurve::Linear,
         )))
         .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
-            ResponseCurve::Polynomial { exponent: 2.0 },  // Strong boost for aggressive
+            ResponseCurve::Polynomial { exponent: 3.0 },  // Stronger boost from 2.0 to 3.0
         )))
         .with_combiner(ScoreCombiner::Average)
 }
@@ -344,7 +344,7 @@ fn create_defensive_move_evaluator() -> ActionEvaluator {
 }
 
 fn create_defensive_seek_cover_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekCover", 0.9)
+    ActionEvaluator::new("SeekCover", 0.8)  // Reduced from 0.9
         .with_consideration(Box::new(HealthLevelConsideration::new(
             ResponseCurve::Inverse,
         )))
@@ -358,7 +358,7 @@ fn create_defensive_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_defensive_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.5)  // Increased from 0.3
+    ActionEvaluator::new("SeekObjective", 0.6)  // Increased from 0.5
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Inverse,
         )))
@@ -436,7 +436,7 @@ fn create_objective_move_evaluator() -> ActionEvaluator {
 }
 
 fn create_objective_seek_cover_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekCover", 0.6)
+    ActionEvaluator::new("SeekCover", 0.5)  // Reduced from 0.6
         .with_consideration(Box::new(HealthLevelConsideration::new(
             ResponseCurve::Inverse,
         )))
@@ -450,7 +450,7 @@ fn create_objective_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_objective_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.8)
+    ActionEvaluator::new("SeekObjective", 0.9)  // Increased from 0.8
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Inverse,
         )))
@@ -458,7 +458,7 @@ fn create_objective_seek_objective_evaluator() -> ActionEvaluator {
             ResponseCurve::Polynomial { exponent: 2.0 },
         )))
         .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
-            ResponseCurve::Polynomial { exponent: 2.0 },  // Strong boost
+            ResponseCurve::Polynomial { exponent: 3.0 },  // Stronger boost from 2.0 to 3.0
         )))
         .with_combiner(ScoreCombiner::Average)
 }
@@ -542,7 +542,7 @@ fn create_scout_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_scout_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.9)
+    ActionEvaluator::new("SeekObjective", 0.9)  // Already at 0.9, keeping high
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Inverse,
         )))
@@ -550,7 +550,7 @@ fn create_scout_seek_objective_evaluator() -> ActionEvaluator {
             ResponseCurve::Inverse,
         )))
         .with_consideration(Box::new(NoEnemiesVisibleConsideration::new(
-            ResponseCurve::Polynomial { exponent: 2.0 },  // Strong boost - scouts explore
+            ResponseCurve::Polynomial { exponent: 3.0 },  // Stronger boost from 2.0 to 3.0 - scouts explore
         )))
         .with_combiner(ScoreCombiner::Average)
 }
@@ -634,7 +634,7 @@ fn create_rearguard_seek_cover_evaluator() -> ActionEvaluator {
 }
 
 fn create_rearguard_seek_objective_evaluator() -> ActionEvaluator {
-    ActionEvaluator::new("SeekObjective", 0.75)  // Increased from 0.7
+    ActionEvaluator::new("SeekObjective", 0.8)  // Increased from 0.75
         .with_consideration(Box::new(ObjectiveProximityConsideration::new(
             ResponseCurve::Linear,
         )))

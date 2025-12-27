@@ -84,7 +84,7 @@
 
 #### Remaining Tasks
 - [ ] Action/event subdivision for animation support
-- [ ] Visual action indicators (muzzle flashes, movement trails)
+- [x] Visual action indicators (muzzle flashes - implemented 2025-12-27)
 - [ ] FOW mode options (configurable vision modes)
 
 #### Implementation Details - Core Systems
@@ -131,8 +131,10 @@
 - ✓ Last-seen enemy markers (ghost positions)
 - ✓ Shared ally vision (combined FOV)
 - ✓ Targeting mode with visual validation feedback
+- ✓ Muzzle flash visual indicators (implemented 2025-12-27)
+- ✓ FOV-based enemy visibility (reveal-on-fire, 2025-12-27)
+- ✓ Corpse rendering z-level (two-pass rendering, 2025-12-27)
 - Action subdivision for animations (not implemented)
-- Visual action indicators (not implemented)
 - Configurable FOW modes (not implemented)
 
 ---
@@ -438,8 +440,11 @@ _(To be tracked as development progresses)_
   - Runtime position validation (debug builds)
   - Integration tests for movement execution
   - TROUBLESHOOTING.md guide
+  - **GameLoopGuard type-state enforcement** (execution order)
+  - **input_occurred flag** (prevents excessive dispatch, 2025-12-27)
 - **Comprehensive comments** explaining critical system order
 - **Test coverage** for core gameplay systems
+- **CLAUDE.md critical documentation** (turn-based game loop requirements)
 
 ---
 
@@ -490,4 +495,65 @@ _(To be tracked as development progresses)_
 
 ---
 
-*Last updated: 2025-12-21 (late evening) - AI combat & tactical intelligence overhaul*
+## Latest Update (2025-12-27)
+
+### Visual Feedback & Critical Bug Fixes
+
+**Problem Solved:** Multiple issues with visual feedback, cursor behavior, and turn-based game loop causing units to freeze.
+
+**Solutions Implemented:**
+
+1. **Muzzle Flash Persistence Fix**
+   - Flashes now persist through Planning phase into player's turn
+   - Cleaned when transitioning Planning → Execution
+   - Players see enemy fire locations before taking action
+
+2. **FOV/FOW Rendering Improvements**
+   - Soldiers only render if visible to player
+   - Allies always visible
+   - Enemies only visible in FOV or when recently fired
+   - Reveal-on-fire: enemy positions revealed when they shoot
+
+3. **Corpse Z-Level Rendering**
+   - Two-pass rendering: dead soldiers first, living soldiers second
+   - Living soldiers always render on top of corpses
+   - Cleaner visuals in high-casualty areas
+
+4. **Cursor Positioning Fix**
+   - Look/Targeting mode cursor now starts at viewport center
+   - Previous: cursor started at player position (often off-screen)
+   - Enhanced cursor visibility with high-contrast styling
+
+5. **Movement Bug - Final Fix**
+   - Added `input_occurred` flag to prevent excessive dispatch calls
+   - Dispatch only runs when input processed, not every frame
+   - Complements existing GameLoopGuard type-state enforcement
+   - Both safeguards required: ORDER + FREQUENCY control
+
+6. **AI SeekObjective Tuning**
+   - Base scores increased: 0.75-0.9
+   - Polynomial exponent 3.0 for aggressive personalities
+   - SeekCover reduced: 0.5-0.8
+   - AI more actively pursues objectives
+
+7. **Debug Output Cleanup**
+   - Removed eprintln! performance logging breaking TUI
+   - Cleaner console output
+
+**Technical Details:**
+- GameLoopGuard enforces correct execution order (type-state pattern)
+- input_occurred flag prevents turn advancement before input processed
+- CLAUDE.md updated with comprehensive turn-based game loop documentation
+- Muzzle flash timing tied to game phase transitions
+- FOV-based rendering uses existing visibility calculations
+
+**Impact:**
+- Movement bug completely resolved (no more frozen units)
+- Clear visual feedback for player tactical decisions
+- Enhanced cursor usability
+- AI behavior more objective-focused
+- Cleaner TUI rendering
+
+---
+
+*Last updated: 2025-12-27 - Visual feedback & critical bug fixes*
